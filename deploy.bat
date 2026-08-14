@@ -2,8 +2,11 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
+set OWNER=UnoRfl
+set REPO=unorfl.github.io
+
 echo ============================================
-echo   Deploying portfolio to unorfl.github.io
+echo   Deploying portfolio to %REPO%
 echo ============================================
 echo.
 
@@ -22,82 +25,116 @@ if not exist index.html (
   exit /b 1
 )
 
-echo [1/3] preparing repository
+echo [1/4] preparing local repository
 if not exist .git git init -q
 git add index.html README.md deploy.sh deploy.bat >nul 2>nul
 git diff --cached --quiet
 if errorlevel 1 git commit -q -m "portfolio: Juan Rafael / codename Uno"
 git branch -M main
+git remote remove origin >nul 2>nul
+git remote add origin https://github.com/%OWNER%/%REPO%.git
 
-where gh >nul 2>nul
-if errorlevel 1 goto MANUAL
-
-REM ---------- GitHub CLI path: fully automatic ----------
-gh auth status >nul 2>nul
-if errorlevel 1 goto MANUAL
-
-echo [2/3] creating repo and pushing via gh
-gh repo view UnoRfl/unorfl.github.io >nul 2>nul
-if errorlevel 1 (
-  gh repo create unorfl.github.io --public --source=. --remote=origin --push
-) else (
-  echo       repo already exists, reusing it
-  git remote remove origin >nul 2>nul
-  git remote add origin https://github.com/UnoRfl/unorfl.github.io.git
-  git push -u origin main --force-with-lease
+echo [2/4] checking who git thinks you are
+for /f "delims=" %%A in ('git config --get user.name 2^>nul') do set GITNAME=%%A
+for /f "delims=" %%A in ('git config --get user.email 2^>nul') do set GITMAIL=%%A
+if "!GITNAME!"=="" (
+  echo       [!] git has no user.name set. Setting a default.
+  git config --global user.name "%OWNER%"
 )
+if "!GITMAIL!"=="" (
+  echo       [!] git has no user.email set. Setting a default.
+  git config --global user.email "Improvised30@gmail.com"
+)
+echo       name : !GITNAME!
+echo       email: !GITMAIL!
 
-echo [3/3] enabling GitHub Pages
-gh api -X POST repos/UnoRfl/unorfl.github.io/pages -f "source[branch]=main" -f "source[path]=/" >nul 2>nul
-if errorlevel 1 gh api -X PUT repos/UnoRfl/unorfl.github.io/pages -f "source[branch]=main" -f "source[path]=/" >nul 2>nul
+echo [3/4] checking the remote exists and you can reach it
+git ls-remote https://github.com/%OWNER%/%REPO%.git >nul 2>nul
+if errorlevel 1 goto NOREMOTE
+
+echo       remote OK
+echo [4/4] pushing
+git push -u origin main
+if errorlevel 1 goto PUSHFAIL
 
 echo.
 echo ============================================
-echo   DONE. Live in 1-2 minutes at:
-echo   https://unorfl.github.io/
+echo   PUSHED.
+echo.
+echo   Last step - open this page and switch Pages on:
+echo   https://github.com/%OWNER%/%REPO%/settings/pages
+echo.
+echo   Source: "Deploy from a branch"
+echo   Branch: main     Folder: / (root)     Save
+echo.
+echo   Then live at:  https://%REPO%/
 echo ============================================
 echo.
+start "" "https://github.com/%OWNER%/%REPO%/settings/pages"
 pause
 exit /b 0
 
-REM ---------- manual path ----------
-:MANUAL
+:NOREMOTE
 echo.
-echo [2/3] GitHub CLI not found (or not logged in).
+echo ============================================
+echo   Cannot reach that repository.
+echo ============================================
 echo.
-echo       Create an EMPTY public repo named exactly:
+echo   This means ONE of two things:
 echo.
-echo           unorfl.github.io
+echo   (A) The repo does not exist yet.
+echo       Create it - the page is opening now.
+echo         Owner : %OWNER%
+echo         Name  : %REPO%          ^<-- must match EXACTLY
+echo         Public, and tick NOTHING
+echo         (no README, no .gitignore, no license)
 echo.
-echo       at  https://github.com/new
-echo       Do NOT tick README, .gitignore or license.
+echo   (B) Your GitHub username is not "%OWNER%".
+echo       Check the URL of your GitHub profile page.
+echo       If it differs, tell Claude - the website itself
+echo       also reads from that username.
+echo.
+start "" "https://github.com/new"
 echo.
 pause
-
-git remote remove origin >nul 2>nul
-git remote add origin https://github.com/UnoRfl/unorfl.github.io.git
-
 echo.
-echo       pushing...
-git push -u origin main
+echo   Retrying...
+git ls-remote https://github.com/%OWNER%/%REPO%.git >nul 2>nul
 if errorlevel 1 (
   echo.
-  echo [X] Push failed. Most likely the repo does not exist yet,
-  echo     or the name is not exactly  unorfl.github.io
+  echo   [X] Still cannot reach it. Run this and send Claude the output:
+  echo.
+  echo       git ls-remote https://github.com/%OWNER%/%REPO%.git
   echo.
   pause
   exit /b 1
 )
-
+echo   Found it. Pushing...
+git push -u origin main
+if errorlevel 1 goto PUSHFAIL
 echo.
-echo [3/3] One switch left - open this page:
-echo.
-echo       https://github.com/UnoRfl/unorfl.github.io/settings/pages
-echo.
-echo       Source: "Deploy from a branch"
-echo       Branch: main    Folder: / (root)    then Save
-echo.
-echo       Then it is live at  https://unorfl.github.io/
-echo.
+echo   PUSHED. Now switch Pages on:
+echo   https://github.com/%OWNER%/%REPO%/settings/pages
+echo   Branch: main   Folder: / (root)
+start "" "https://github.com/%OWNER%/%REPO%/settings/pages"
 pause
 exit /b 0
+
+:PUSHFAIL
+echo.
+echo ============================================
+echo   Push failed after reaching the repo.
+echo ============================================
+echo.
+echo   If it mentioned "non-fast-forward" or "rejected",
+echo   the repo was created WITH a README. Run this once:
+echo.
+echo       git push -u origin main --force
+echo.
+echo   If it asked for a password and rejected it: GitHub does
+echo   not accept account passwords over https. Sign in through
+echo   the browser window Git opens, or install GitHub CLI
+echo   (https://cli.github.com) and run:  gh auth login
+echo.
+pause
+exit /b 1
