@@ -256,6 +256,11 @@ section{padding:clamp(56px,9vw,110px) 0}
   min-height:min(88vh,860px);
   display:flex;align-items:flex-end;
   overflow:hidden;
+  /* Horizontal drags belong to the 3D scene, vertical ones still scroll
+     the page. Without this the browser claims the whole gesture and the
+     figure can't be turned by touch — or worse, turning it traps the
+     scroll. This single line is what makes the hero usable on a phone. */
+  touch-action:pan-y;
 }
 .hero-inner{
   position:relative;
@@ -308,30 +313,64 @@ section{padding:clamp(56px,9vw,110px) 0}
    to pass behind it. pointer-events:none keeps the name behind
    hoverable — the canvas is a purely decorative element and the
    cursor influence is driven off window pointermove elsewhere. */
-/* Sized for a standing figure: a near-square box rather than the wide
-   letterbox a vehicle wanted. The camera solves its own distance from
-   this box's aspect, so the whole figure stays framed either way — but
-   a tall box means it fills more of the frame instead of sitting small
-   in the middle of a lot of empty width. */
+/* The canvas spans the whole hero, edge to edge. This is what stops the
+   effect from revealing its own container: a shockwave expanding inside
+   a smaller box would clip on that box's sides and read as a frame sitting
+   on top of the page. Full-bleed means the only boundary it can ever reach
+   is the edge of the screen.
+
+   The mask is the second half of that. It feathers the outer band of the
+   canvas to nothing, so anything still travelling when it gets there
+   dissolves instead of ending on a straight line. The figure sits well
+   inside the untouched centre — PAD in the camera fit keeps it there —
+   so the mask never touches the model itself. */
 .hero-car{
   position:absolute;
   z-index:2;
-  left:50%;bottom:0;
-  transform:translateX(-50%);
-  width:min(72vw,780px);
-  height:min(82vh,760px);
+  inset:0;
+  width:100%;
+  height:100%;
   pointer-events:none;
   opacity:0;
   transition:opacity 1.4s cubic-bezier(.22,.61,.36,1);
+  -webkit-mask-image:
+    linear-gradient(to right,  transparent 0%, #000 9%, #000 91%, transparent 100%),
+    linear-gradient(to bottom, transparent 0%, #000 7%, #000 93%, transparent 100%);
+          mask-image:
+    linear-gradient(to right,  transparent 0%, #000 9%, #000 91%, transparent 100%),
+    linear-gradient(to bottom, transparent 0%, #000 7%, #000 93%, transparent 100%);
+  -webkit-mask-composite:source-in;
+          mask-composite:intersect;
 }
 .hero-car.in{opacity:1}
 #car-canvas{
   width:100%;height:100%;
   display:block;
 }
-/* The trigger sits under the figure and doubles as the caption. It is a
+/* The flash is what makes the technique belong to the page rather than
+   to the canvas. It is a fixed, full-viewport wash that brightens on the
+   collapse, so the release appears to light the whole layout — name,
+   aurora, chrome and all — instead of staying politely inside a box.
+   screen blending keeps it additive over the dark background; opacity is
+   driven from the render loop. */
+#cursed-flash{
+  position:fixed;
+  inset:0;
+  z-index:3;
+  pointer-events:none;
+  opacity:0;
+  mix-blend-mode:screen;
+  background:
+    radial-gradient(60% 50% at 50% 46%, rgba(170,60,255,.55), rgba(170,60,255,.16) 45%, transparent 72%),
+    radial-gradient(120% 90% at 50% 50%, rgba(90,30,160,.28), transparent 70%);
+  will-change:opacity;
+}
+@media (prefers-reduced-motion:reduce){
+  #cursed-flash{display:none}
+}
+/* The trigger sits under the figure and doubles as the caption. It's a
    real button so the effect is reachable by keyboard and announced to a
-   screen reader, not only by clicking the canvas. This one element opts
+   screen reader, not only by tapping the canvas. This one element opts
    back into pointer events; the canvas above it stays inert so the name
    behind keeps its hover-to-decode. */
 .car-meta{
@@ -365,17 +404,23 @@ section{padding:clamp(56px,9vw,110px) 0}
 .car-meta .s-red{background:#FF3C5A;box-shadow:0 0 8px rgba(255,60,90,.8)}
 .car-meta .s-blue{background:#3C7BFF;box-shadow:0 0 8px rgba(60,123,255,.8)}
 /* while the technique runs, both swatches resolve to purple */
-.hero-car.charging .car-meta{border-color:rgba(170,60,255,.55);color:var(--ink)}
-.hero-car.charging .car-meta .swatch{
+/* general-sibling, because the button now sits outside .hero-car so the
+   canvas edge mask can't feather it away */
+.hero-car.charging ~ .car-meta{border-color:rgba(170,60,255,.55);color:var(--ink)}
+.hero-car.charging ~ .car-meta .swatch{
   background:var(--purple);
   box-shadow:0 0 14px rgba(170,60,255,.95);
 }
 .car-loading{
-  position:absolute;inset:0;
+  position:absolute;
+  left:50%;top:50%;
+  transform:translate(-50%,-50%);
+  z-index:4;
   display:flex;align-items:center;justify-content:center;
   font-family:var(--font-m);font-size:11px;letter-spacing:.24em;color:var(--dim);
   opacity:1;transition:opacity .45s ease;
   pointer-events:none;
+  white-space:nowrap;
 }
 .car-loading.out{opacity:0}
 .car-loading .bar{
@@ -444,31 +489,48 @@ section{padding:clamp(56px,9vw,110px) 0}
      the bust and the footer start colliding. On phones the hero becomes
      an ordinary flex column and the name is pulled up over the bust with
      a negative margin, which is predictable at any height. */
-  .hero{min-height:0;width:100vw;margin-left:calc(50% - 50vw);padding:10px 0 34px}
+  /* The hero keeps a real height on phones because the canvas behind it
+     is absolutely positioned and needs a box to fill. Content sits in a
+     column pushed to the bottom, layered over the figure the same way
+     the desktop composition does. */
+  .hero{
+    min-height:min(90vh,720px);
+    width:100vw;margin-left:calc(50% - 50vw);
+    padding:10px 0 34px;
+  }
   .hero-inner{
-    min-height:0;
+    min-height:min(90vh,720px);
     display:flex;flex-direction:column;align-items:center;
+    justify-content:flex-end;
   }
   .hero-mark{
-    position:static;order:0;align-self:flex-start;
+    position:absolute;top:0;left:0;order:0;
     padding-left:clamp(14px,4vw,24px);margin-bottom:14px;
+    z-index:5;
   }
-  .hero-car{
-    position:relative;order:1;z-index:2;
-    left:auto;bottom:auto;transform:none;
-    width:100%;height:min(58vh,440px);
+  /* .hero-car is deliberately NOT overridden here — it stays absolute and
+     full-bleed, exactly as on desktop. Putting it back into the flow would
+     make its top and bottom real boundaries in the middle of the page, and
+     the shockwave would visibly terminate on them. Keeping it full-bleed
+     means the only edge it can ever reach is the edge of the screen.
+     Everything else in the hero becomes a normal column stacked over it. */
+  /* the trigger joins the column instead of floating, so it can never
+     land on top of the role text or the footer at small heights */
+  .car-meta{
+    position:static;order:3;
+    transform:none;
+    margin-top:14px;
+    z-index:5;
   }
-  .car-meta{bottom:0}
   .hero-band{
     position:relative;order:2;z-index:1;
     top:auto;bottom:auto;
     width:100%;
-    margin-top:-42px;       /* tucks the top of JUAN behind the car */
   }
   .hero-name{white-space:normal;text-align:center;line-height:.86}
   .hero-foot{
-    display:flex;order:3;
-    position:static;
+    display:flex;order:4;
+    position:static;z-index:5;
     flex-direction:column;align-items:center;gap:20px;
     margin-top:20px;
   }
@@ -803,13 +865,19 @@ footer{
       <div class="hero-car" id="car" role="img"
            aria-label="Satoru Gojo — hero scene">
         <canvas id="car-canvas"></canvas>
-        <div class="car-loading" id="car-loading">LOADING ASSET<span class="bar" aria-hidden="true"></span></div>
-        <button class="car-meta" id="cursed-trigger" type="button" disabled>
-          <span class="swatch s-red" aria-hidden="true"></span>
-          <span class="swatch s-blue" aria-hidden="true"></span>
-          <span>HOLLOW PURPLE</span>
-        </button>
       </div>
+
+      <!-- Kept as siblings of the canvas, not children: .hero-car carries
+           the edge mask that feathers the effect out, and anything inside
+           it would be feathered too. -->
+      <div class="car-loading" id="car-loading">LOADING ASSET<span class="bar" aria-hidden="true"></span></div>
+      <button class="car-meta" id="cursed-trigger" type="button" disabled>
+        <span class="swatch s-red" aria-hidden="true"></span>
+        <span class="swatch s-blue" aria-hidden="true"></span>
+        <span>HOLLOW PURPLE</span>
+      </button>
+
+      <div id="cursed-flash" aria-hidden="true"></div>
 
       <div class="hero-foot">
         <p class="hero-role">
@@ -1513,9 +1581,9 @@ footer{
   const canvas  = document.getElementById('car-canvas');
   const loading = document.getElementById('car-loading');
   const trigger = document.getElementById('cursed-trigger');
+  const flash   = document.getElementById('cursed-flash');
   if(!wrap || !canvas) return;
 
-  // WebGL gate — quietly remove the block on unsupported browsers
   const probe = document.createElement('canvas');
   const hasGL = !!(window.WebGLRenderingContext &&
                    (probe.getContext('webgl2') || probe.getContext('webgl')));
@@ -1542,93 +1610,274 @@ footer{
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobile ? 1.0 : 1.5));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  // No tone mapping: the model is KHR_materials_unlit, so its textures are
+  // No tone mapping — the model is KHR_materials_unlit, so its textures are
   // already at final brightness and ACES would only wash them out.
 
   const scene  = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
-
-  // The model is unlit, so scene lights and env maps do nothing to it.
-  // One cheap hemisphere stays as a safety net for any non-unlit mesh.
   scene.add(new THREE.HemisphereLight(0xffffff, 0x0a0a12, 0.6));
 
-  /* ── shared radial-gradient sprite texture ──────────────────────────
-     One 128px canvas texture reused by every glow sprite. Sprites are
-     tinted per-instance via material.color, so a single texture covers
-     red, blue and purple without three uploads.
-     ───────────────────────────────────────────────────────────────── */
+  const RED  = new THREE.Color(0xFF3C5A);   // the page's existing accent
+  const BLUE = new THREE.Color(0x3C7BFF);
+  const PURP = new THREE.Color(0xAA3CFF);   // the page's existing accent
+
+  /* ══════════════════════════════════════════════════════════════════
+     SHARED GLSL
+     Hash-based value noise plus fbm. Octave count drops on mobile — the
+     silhouette of the effect is unchanged, only fine detail thins out,
+     and it buys back a lot of fragment time.
+     ══════════════════════════════════════════════════════════════════ */
+  const NOISE_GLSL = `
+    float hash(vec3 p){
+      p = fract(p * 0.3183099 + 0.1);
+      p *= 17.0;
+      return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+    float vnoise(vec3 x){
+      vec3 i = floor(x), f = fract(x);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(
+        mix(mix(hash(i + vec3(0.0,0.0,0.0)), hash(i + vec3(1.0,0.0,0.0)), f.x),
+            mix(hash(i + vec3(0.0,1.0,0.0)), hash(i + vec3(1.0,1.0,0.0)), f.x), f.y),
+        mix(mix(hash(i + vec3(0.0,0.0,1.0)), hash(i + vec3(1.0,0.0,1.0)), f.x),
+            mix(hash(i + vec3(0.0,1.0,1.0)), hash(i + vec3(1.0,1.0,1.0)), f.x), f.y),
+        f.z);
+    }
+    float fbm(vec3 p){
+      float v = 0.0, a = 0.5;
+      for(int i = 0; i < OCTAVES; i++){
+        v += a * vnoise(p);
+        p *= 2.02;
+        a *= 0.5;
+      }
+      return v;
+    }
+  `;
+
+  const OCT = '#define OCTAVES ' + (mobile ? 2 : 4) + '\n';
+
+  /* ══════════════════════════════════════════════════════════════════
+     ENERGY SPHERE
+     An additive shell, not a flat sprite. Because every fragment on a
+     sphere sits at the same radius, depth can't come from distance to
+     the centre — it comes from how directly the fragment faces the
+     camera. Fragments facing us read as the hot core, fragments at the
+     silhouette read as the rim, and animated fbm breaks up both so the
+     ball churns instead of sitting there as a smooth blob.
+     ══════════════════════════════════════════════════════════════════ */
+  function energyMaterial(colour){
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      uniforms: {
+        uTime:   { value: 0 },
+        uColour: { value: colour.clone() },
+        uPower:  { value: 1 },      // overall intensity, driven per phase
+        uChurn:  { value: 1 }       // noise speed — rises during wind-up
+      },
+      vertexShader: [
+        'varying vec3 vNormalW;',
+        'varying vec3 vViewW;',
+        'varying vec3 vPosL;',
+        'void main(){',
+        '  vPosL    = position;',
+        '  vNormalW = normalize(mat3(modelMatrix) * normal);',
+        '  vec4 world = modelMatrix * vec4(position, 1.0);',
+        '  vViewW   = normalize(cameraPosition - world.xyz);',
+        '  gl_Position = projectionMatrix * viewMatrix * world;',
+        '}'
+      ].join('\n'),
+      fragmentShader: OCT + NOISE_GLSL + [
+        'uniform float uTime;',
+        'uniform vec3  uColour;',
+        'uniform float uPower;',
+        'uniform float uChurn;',
+        'varying vec3 vNormalW;',
+        'varying vec3 vViewW;',
+        'varying vec3 vPosL;',
+        'void main(){',
+        '  float ndv = clamp(dot(normalize(vNormalW), normalize(vViewW)), 0.0, 1.0);',
+        // two fbm layers drifting against each other so the pattern
+        // never visibly repeats
+        '  vec3  q  = vPosL * 3.4 + vec3(0.0, uTime * 0.55 * uChurn, 0.0);',
+        '  float n1 = fbm(q);',
+        '  float n2 = fbm(vPosL * 6.1 - vec3(uTime * 0.4 * uChurn, 0.0, 0.0));',
+        '  float n  = mix(n1, n2, 0.45);',
+        '  float core = pow(ndv, 3.0) * (0.55 + n * 0.9);',
+        '  float rim  = pow(1.0 - ndv, 2.4) * 1.5;',
+        // thin bright veins through the body
+        '  float vein = smoothstep(0.62, 0.78, n) * pow(ndv, 1.2) * 1.1;',
+        '  float i = (core + rim + vein) * uPower;',
+        // hot centre desaturates toward white, like a real overexposure
+        '  vec3 col = mix(uColour, vec3(1.0), clamp(i - 1.05, 0.0, 0.75));',
+        '  gl_FragColor = vec4(col * i, i);',
+        '}'
+      ].join('\n')
+    });
+  }
+
+  const sphereGeo = new THREE.SphereGeometry(1, mobile ? 24 : 40, mobile ? 16 : 28);
+
+  const matRed  = energyMaterial(RED);
+  const matBlue = energyMaterial(BLUE);
+  const matPurp = energyMaterial(PURP);
+
+  const orbRed  = new THREE.Mesh(sphereGeo, matRed);
+  const orbBlue = new THREE.Mesh(sphereGeo, matBlue);
+  const orbPurp = new THREE.Mesh(sphereGeo, matPurp);
+  orbPurp.visible = false;
+  scene.add(orbRed, orbBlue, orbPurp);
+
+  /* ══════════════════════════════════════════════════════════════════
+     SHOCKWAVE
+     A camera-facing quad drawn as a turbulent annulus. The red and blue
+     channels are sampled at slightly different radii, which splits the
+     leading edge into a thin chromatic fringe — that fringe is most of
+     what makes it read as a release of force rather than a plain ring.
+     ══════════════════════════════════════════════════════════════════ */
+  const waveMat = new THREE.ShaderMaterial({
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uTime:    { value: 0 },
+      uProg:    { value: 0 },
+      uOpacity: { value: 0 },
+      uColour:  { value: PURP.clone() }
+    },
+    vertexShader: [
+      'varying vec2 vUv;',
+      'void main(){',
+      '  vUv = uv;',
+      '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+      '}'
+    ].join('\n'),
+    fragmentShader: OCT + NOISE_GLSL + [
+      'uniform float uTime, uProg, uOpacity;',
+      'uniform vec3  uColour;',
+      'varying vec2 vUv;',
+      'float band(float r, float at, float w){',
+      '  return smoothstep(w, 0.0, abs(r - at));',
+      '}',
+      'void main(){',
+      '  vec2  p = vUv - 0.5;',
+      '  float r = length(p) * 2.0;',
+      '  float a = atan(p.y, p.x);',
+      // ragged leading edge — turbulence keyed to angle so the ring
+      // wobbles around its circumference instead of staying machined
+      '  float turb = fbm(vec3(cos(a) * 2.4, sin(a) * 2.4, uTime * 0.6));',
+      '  float edge = 0.82 + (turb - 0.5) * 0.10;',
+      '  float w = mix(0.10, 0.028, uProg);',
+      // chromatic split: channels peak at slightly different radii
+      '  float cr = band(r, edge + 0.014, w);',
+      '  float cg = band(r, edge,         w);',
+      '  float cb = band(r, edge - 0.014, w);',
+      '  float wash = smoothstep(edge, 0.0, r) * 0.16 * (1.0 - uProg);',
+      '  vec3 col = vec3(cr, cg, cb) * uColour + vec3(cg) * 0.55 + uColour * wash;',
+      '  float i  = (max(max(cr, cg), cb) + wash) * uOpacity;',
+      '  gl_FragColor = vec4(col * uOpacity, i);',
+      '}'
+    ].join('\n')
+  });
+
+  const wave = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), waveMat);
+  wave.visible = false;
+  scene.add(wave);
+
+  /* ══════════════════════════════════════════════════════════════════
+     CONVERGENCE STREAMS
+     Points spiralling in along two arms. Position is computed in the
+     vertex shader from a per-point seed and one progress uniform, so the
+     CPU never touches the buffer — the whole stream costs a single
+     uniform write per frame.
+     ══════════════════════════════════════════════════════════════════ */
+  const COUNT = mobile ? 220 : 460;
+  const seeds = new Float32Array(COUNT * 3);
+  for(let i = 0; i < COUNT; i++){
+    seeds[i*3+0] = (i % 2 === 0) ? 1 : -1;     // which arm
+    seeds[i*3+1] = Math.random();              // where along it
+    seeds[i*3+2] = Math.random() * 6.283;      // phase jitter
+  }
+  const streamGeo = new THREE.BufferGeometry();
+  streamGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(COUNT * 3), 3));
+  streamGeo.setAttribute('seed',     new THREE.BufferAttribute(seeds, 3));
+
+  const streamMat = new THREE.ShaderMaterial({
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    uniforms: {
+      uProg:   { value: 0 },
+      uRadius: { value: 1.6 },
+      uHeight: { value: 1.2 },
+      uSize:   { value: mobile ? 46 : 64 },
+      uFade:   { value: 0 },
+      uRed:    { value: RED.clone() },
+      uBlue:   { value: BLUE.clone() }
+    },
+    vertexShader: [
+      'attribute vec3 seed;',
+      'uniform float uProg, uRadius, uHeight, uSize;',
+      'uniform vec3  uRed, uBlue;',
+      'varying vec3  vCol;',
+      'varying float vAlpha;',
+      'void main(){',
+      '  float arm   = seed.x;',
+      '  float along = seed.y;',
+      '  float jit   = seed.z;',
+      // each point runs a slightly offset schedule so the stream arrives
+      // as a trail rather than one popping ring
+      '  float t = clamp((uProg - along * 0.42) / 0.58, 0.0, 1.0);',
+      '  float e = t * t * (3.0 - 2.0 * t);',
+      '  float rad   = uRadius * (1.0 - e);',
+      '  float twist = jit + e * 7.0 * arm;',
+      '  vec3 pos = vec3(',
+      '    cos(twist) * rad * arm,',
+      '    uHeight + sin(jit * 2.0) * 0.22 * (1.0 - e),',
+      '    sin(twist) * rad * arm',
+      '  );',
+      '  vCol   = arm > 0.0 ? uRed : uBlue;',
+      '  vAlpha = smoothstep(0.0, 0.15, t) * (1.0 - smoothstep(0.82, 1.0, t));',
+      '  vec4 mv = modelViewMatrix * vec4(pos, 1.0);',
+      '  gl_PointSize = uSize * (1.0 / -mv.z) * (0.5 + e * 0.8);',
+      '  gl_Position  = projectionMatrix * mv;',
+      '}'
+    ].join('\n'),
+    fragmentShader: [
+      'uniform float uFade;',
+      'varying vec3  vCol;',
+      'varying float vAlpha;',
+      'void main(){',
+      // round, soft-edged point — gl_PointCoord is the quad's own uv
+      '  float d = length(gl_PointCoord - 0.5) * 2.0;',
+      '  float f = pow(smoothstep(1.0, 0.0, d), 1.8);',
+      '  float a = f * vAlpha * uFade;',
+      '  gl_FragColor = vec4(vCol * a * 2.2, a);',
+      '}'
+    ].join('\n')
+  });
+
+  const streams = new THREE.Points(streamGeo, streamMat);
+  streams.visible = false;
+  scene.add(streams);
+
+  /* ── contact shadow ─────────────────────────────────────────────── */
   function radialTexture(stops){
     const c = document.createElement('canvas');
     c.width = c.height = 128;
     const ctx = c.getContext('2d');
     const g = ctx.createRadialGradient(64,64,0, 64,64,64);
-    stops.forEach(([at, col]) => g.addColorStop(at, col));
-    ctx.fillStyle = g;
-    ctx.fillRect(0,0,128,128);
+    stops.forEach(s => g.addColorStop(s[0], s[1]));
+    ctx.fillStyle = g; ctx.fillRect(0,0,128,128);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
     return t;
   }
 
-  const glowTex = radialTexture([
-    [0,    'rgba(255,255,255,1)'],
-    [0.18, 'rgba(255,255,255,.85)'],
-    [0.45, 'rgba(255,255,255,.28)'],
-    [1,    'rgba(255,255,255,0)']
-  ]);
-
-  // hollow ring for the burst — bright annulus, transparent core
-  const ringTex = radialTexture([
-    [0,    'rgba(255,255,255,0)'],
-    [0.58, 'rgba(255,255,255,0)'],
-    [0.72, 'rgba(255,255,255,.95)'],
-    [0.86, 'rgba(255,255,255,.35)'],
-    [1,    'rgba(255,255,255,0)']
-  ]);
-
-  // depthTest on = the orb is correctly hidden when it orbits behind the
-  // figure, which is what makes it read as being in the same space rather
-  // than pasted over the top. The release ring opts out, since that one is
-  // meant to wash over everything.
-  function glowSprite(hex, size, depthTest = true){
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: glowTex,
-      color: hex,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      depthTest
-    }));
-    s.scale.setScalar(size);
-    return s;
-  }
-
-  /* ── Limitless orbs ────────────────────────────────────────────────
-     Reversal Red (repulsion) and Lapse Blue (attraction) idle on
-     opposite sides of the figure. On activation they converge and
-     collapse into Hollow Purple, then release as an expanding ring.
-     Four sprites total — additive, depth-test off, no shadows. Cheap.
-     ───────────────────────────────────────────────────────────────── */
-  const RED  = 0xFF3C5A;    // the page's existing pink accent
-  const BLUE = 0x3C7BFF;
-  const PURP = 0xAA3CFF;    // the page's existing purple accent
-
-  const orbRed  = glowSprite(RED,  1.05);
-  const orbBlue = glowSprite(BLUE, 1.05);
-  const orbPurp = glowSprite(PURP, 0.1, false);   // overlay, not occluded
-  orbPurp.visible = false;
-
-  const burst = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: ringTex, color: PURP, transparent: true,
-    blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false
-  }));
-  burst.scale.setScalar(0.1);
-  burst.visible = false;
-
-  scene.add(orbRed, orbBlue, orbPurp, burst);
-
-  // cheap contact shadow — a soft radial texture on a floor plane,
-  // sized for a standing figure rather than a vehicle footprint
   const shadowPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(2.2, 2.2),
     new THREE.MeshBasicMaterial({
@@ -1644,24 +1893,24 @@ footer{
   shadowPlane.position.y = 0.001;
   scene.add(shadowPlane);
 
+  /* ── model ──────────────────────────────────────────────────────── */
   const draco = new DRACOLoader();
   draco.setDecoderPath('https://www.gstatic.com/draco/v1/decoders/');
-  draco.setDecoderConfig({ type: 'js' });   // wasm decoder needs cross-origin isolation
+  draco.setDecoderConfig({ type: 'js' });   // wasm needs cross-origin isolation
 
   const loader = new GLTFLoader();
   loader.setDRACOLoader(draco);
 
   let modelReady = false;
-  let modelH = 2, modelR = 0.8;             // measured on load
+  let modelH = 2, modelR = 0.8;
 
   loader.load('gojo.glb',
-    (gltf) => {
+    function(gltf){
       const model = gltf.scene;
 
-      // Keep the model's own scale. Centre it horizontally and stand it
-      // on y=0; the camera distance is then solved from these measured
-      // dimensions rather than a hardcoded radius — that hardcode is
-      // what was clipping the hair and the feet.
+      // Keep the model's own scale; centre it horizontally, stand it on
+      // y=0, and let the camera solve its distance from these measured
+      // dimensions. A hardcoded radius is what clipped the hair before.
       const box    = new THREE.Box3().setFromObject(model);
       const size   = box.getSize(new THREE.Vector3());
       const centre = box.getCenter(new THREE.Vector3());
@@ -1670,6 +1919,13 @@ footer{
       modelH = size.y;
       modelR = Math.max(size.x, size.z) / 2;
 
+      // scale the whole effect to the figure
+      const orbR = modelH * 0.13;
+      orbRed.scale.setScalar(orbR);
+      orbBlue.scale.setScalar(orbR);
+      streamMat.uniforms.uRadius.value = modelR + modelH * 0.42;
+      streamMat.uniforms.uHeight.value = modelH * 0.62;
+
       scene.add(model);
       modelReady = true;
       fit();
@@ -1677,40 +1933,37 @@ footer{
       wrap.classList.add('in');
       if(loading){
         loading.classList.add('out');
-        setTimeout(() => loading.remove(), 500);
+        setTimeout(function(){ loading.remove(); }, 500);
       }
       if(trigger) trigger.removeAttribute('disabled');
 
-      if(reduce) renderer.render(scene, camera);   // single static frame
+      if(reduce) renderer.render(scene, camera);
     },
-    (ev) => {
+    function(ev){
       if(loading && ev && ev.lengthComputable){
         const pct = Math.round((ev.loaded / ev.total) * 100);
         loading.firstChild.nodeValue = 'LOADING ASSET · ' + pct + '% ';
       }
     },
-    (err) => {
+    function(err){
       console.error('model load failed:', err);
       if(loading) loading.textContent = 'ASSET OFFLINE';
     }
   );
 
-  /* ── camera fit ────────────────────────────────────────────────────
-     Solve the orbit radius from the model's real bounding box and the
-     current viewport aspect, so the whole figure stays in frame at any
-     size. Vertical and horizontal are solved separately and the larger
-     distance wins; PAD is breathing room in world units.
+  /* ══════════════════════════════════════════════════════════════════
+     CAMERA FIT
+     The canvas is full-bleed now, so its aspect is the viewport's and
+     has nothing to do with how large the figure should read. Framing is
+     solved against the model's measured box instead: vertical and
+     horizontal are solved separately and the larger distance wins.
 
-     The camera sits level with the middle of the body and looks at the
-     same height, which makes the vertical fit symmetric — head and feet
-     get identical margin instead of one of them falling off.
-     ───────────────────────────────────────────────────────────────── */
-  // Padding is in world units and deliberately generous: the cursor can
-  // shift the camera vertically (see TILT below), which tilts the view and
-  // eats into the margin. PAD covers the worst-case tilt so the hair and
-  // the feet stay inside the frame at every orbit angle.
-  const PAD  = 0.34;
-  const TILT = 0.25;
+     PAD is generous on purpose. The cursor tilts the camera (TILT) and
+     that tilt eats margin; PAD covers the worst case so the hair and the
+     feet stay inside the frame at every orbit angle.
+     ══════════════════════════════════════════════════════════════════ */
+  const PAD  = 0.42;
+  const TILT = 0.22;
 
   let RADIUS = 5;
   const LOOK = new THREE.Vector3(0, 1, 0);
@@ -1743,163 +1996,304 @@ footer{
   }
   fit();
 
-  /* ── cursor influence ──────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     INPUT — identical for mouse, pen and touch via pointer events
+
+     The canvas stays pointer-events:none so the name behind it keeps its
+     hover-to-decode, which means these listeners live on window and
+     filter by the hero's bounds instead. `touch-action: pan-y` on the
+     hero (see CSS) is what lets a horizontal drag belong to us while a
+     vertical drag still scrolls the page — the single most important
+     line for this feeling right on a phone.
+
+     A short press that barely moves is a tap and fires the technique; a
+     press that travels horizontally is a drag and steers the orbit.
+     ══════════════════════════════════════════════════════════════════ */
+  let spin = 0, spinV = 0;
   let tx = 0, ty = 0, rx = 0, ry = 0;
-  window.addEventListener('pointermove', (e) => {
-    tx = ((e.clientX / window.innerWidth)  - 0.5) * 2;
-    ty = ((e.clientY / window.innerHeight) - 0.5) * 2;
-  }, { passive:true });
 
-  /* ── Hollow Purple state machine ───────────────────────────────────
-     idle → converge → collapse → release → idle. Phase is driven by a
-     single elapsed-time value rather than nested timeouts, so it can be
-     interrupted and restarted cleanly and never leaves a stray timer.
-     ───────────────────────────────────────────────────────────────── */
-  const PHASE = { IDLE:0, CONVERGE:1, COLLAPSE:2, RELEASE:3 };
-  const DUR   = { CONVERGE:820, COLLAPSE:260, RELEASE:900 };
+  let down = false, dragging = false;
+  let sx = 0, sy = 0, lastX = 0, downAt = 0;
+  const DRAG_SLOP = 8;
 
-  let phase = PHASE.IDLE;
-  let phaseT = 0;
-  let orbit = 0;
+  function inHero(x, y){
+    const r = wrap.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
 
-  function ease(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
+  window.addEventListener('pointerdown', function(e){
+    if(!inHero(e.clientX, e.clientY)) return;
+    down = true; dragging = false;
+    sx = lastX = e.clientX; sy = e.clientY;
+    downAt = performance.now();
+  }, {passive:true});
+
+  window.addEventListener('pointermove', function(e){
+    // hover parallax, desktop only — a finger has no hover state
+    if(!mobile){
+      tx = ((e.clientX / window.innerWidth)  - 0.5) * 2;
+      ty = ((e.clientY / window.innerHeight) - 0.5) * 2;
+    }
+
+    if(!down) return;
+    const dx = e.clientX - sx;
+    const dy = e.clientY - sy;
+
+    if(!dragging){
+      // Claim the gesture only once it's clearly more horizontal than
+      // vertical. A mostly-vertical swipe is the user trying to scroll,
+      // and stealing it is the classic way a 3D hero ruins a phone page.
+      if(Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;
+      if(Math.abs(dy) > Math.abs(dx)){ down = false; return; }
+      dragging = true;
+    }
+
+    const step = (e.clientX - lastX) / window.innerWidth * 3.2;
+    spin  -= step;
+    spinV  = -step;
+    lastX  = e.clientX;
+  }, {passive:true});
+
+  window.addEventListener('pointerup', function(e){
+    if(!down){ dragging = false; return; }
+    down = false;
+    const moved = Math.sqrt(Math.pow(e.clientX - sx, 2) + Math.pow(e.clientY - sy, 2));
+    const quick = performance.now() - downAt < 400;
+    if(!dragging && moved < DRAG_SLOP && quick) activate();
+    dragging = false;
+  }, {passive:true});
+
+  window.addEventListener('pointercancel', function(){
+    down = false; dragging = false;
+  }, {passive:true});
+
+  if(trigger) trigger.addEventListener('click', activate);
+
+  /* ══════════════════════════════════════════════════════════════════
+     HOLLOW PURPLE
+     Reversal Red repels, Lapse Blue attracts; forcing them together
+     produces Hollow Purple. The sequence mirrors that — the two hold
+     apart, are dragged in against the churn, collapse, then release.
+
+     Phase is driven by one elapsed-time value rather than nested
+     timeouts, so it can't leave a stray timer or land half-finished.
+     ══════════════════════════════════════════════════════════════════ */
+  const PHASE = { IDLE:0, CHARGE:1, COLLAPSE:2, BLOOM:3 };
+  const DUR   = { CHARGE:1000, COLLAPSE:190, BLOOM:1250 };
+
+  let phase = PHASE.IDLE, phaseT = 0, orbit = 0;
+  let punch = 0;        // camera dolly kick, world units
+  let shake = 0;        // decaying positional jitter
+
+  function easeInOut(t){ return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
+  function easeOut(t){ return 1 - Math.pow(1 - t, 3); }
+  function easeIn(t){ return t * t * t; }
 
   function activate(){
-    if(!modelReady || reduce) return;
-    if(phase !== PHASE.IDLE) return;      // already running
-    phase  = PHASE.CONVERGE;
+    if(!modelReady || reduce || phase !== PHASE.IDLE) return;
+    phase = PHASE.CHARGE;
     phaseT = 0;
     wrap.classList.add('charging');
   }
 
-  // Click anywhere over the hero triggers it. The canvas itself stays
-  // pointer-events:none so the name behind it keeps its hover-to-decode,
-  // so this tests the hero's bounds on a window-level listener instead.
-  window.addEventListener('pointerdown', (e) => {
-    const r = wrap.getBoundingClientRect();
-    if(e.clientX >= r.left && e.clientX <= r.right &&
-       e.clientY >= r.top  && e.clientY <= r.bottom) activate();
-  }, { passive:true });
+  function setFlash(v){
+    if(flash) flash.style.opacity = v.toFixed(3);
+  }
 
-  // and an explicit, keyboard-reachable control for anyone not clicking
-  if(trigger) trigger.addEventListener('click', activate);
-
-  function updateEffect(dt){
+  function updateEffect(dt, now){
     const chest = modelH * 0.62;
-    orbit += dt * 0.5;
+    const idleR = modelR + modelH * 0.42;
+    const orbR  = modelH * 0.13;
+
+    matRed.uniforms.uTime.value  = now;
+    matBlue.uniforms.uTime.value = now;
+    matPurp.uniforms.uTime.value = now;
+    waveMat.uniforms.uTime.value = now;
+
+    wave.quaternion.copy(camera.quaternion);   // always faces the camera
 
     if(phase === PHASE.IDLE){
-      // Idle: the two techniques hold apart, breathing slightly, on
-      // opposite sides at chest height.
-      const rad = modelR + 0.85;
-      const bob = Math.sin(orbit * 1.4) * 0.06;
+      orbit += dt * 0.5;
+      const bob = Math.sin(orbit * 1.4) * modelH * 0.005;
 
-      orbRed.position.set( Math.cos(orbit) * rad, chest + bob, Math.sin(orbit) * rad - 0.2);
-      orbBlue.position.set(-Math.cos(orbit) * rad, chest - bob, -Math.sin(orbit) * rad - 0.2);
+      orbRed.position.set( Math.cos(orbit) * idleR, chest + bob,  Math.sin(orbit) * idleR);
+      orbBlue.position.set(-Math.cos(orbit) * idleR, chest - bob, -Math.sin(orbit) * idleR);
 
-      const pulse = 1 + Math.sin(orbit * 2.1) * 0.07;
-      orbRed.scale.setScalar(1.05 * pulse);
-      orbBlue.scale.setScalar(1.05 * (2 - pulse));
+      const p = 1 + Math.sin(orbit * 2.1) * 0.06;
+      orbRed.scale.setScalar(orbR * p);
+      orbBlue.scale.setScalar(orbR * (2 - p));
 
-      orbRed.material.opacity = orbBlue.material.opacity = 0.85;
-      orbPurp.visible = burst.visible = false;
+      matRed.uniforms.uPower.value  = 1.15;
+      matBlue.uniforms.uPower.value = 1.15;
+      matRed.uniforms.uChurn.value  = 1.0;
+      matBlue.uniforms.uChurn.value = 1.0;
+
+      orbRed.visible = orbBlue.visible = true;
+      orbPurp.visible = wave.visible = streams.visible = false;
+      punch += (0 - punch) * 0.08;
+      setFlash(0);
       return;
     }
 
     phaseT += dt * 1000;
 
-    if(phase === PHASE.CONVERGE){
-      const t = Math.min(phaseT / DUR.CONVERGE, 1);
-      const e = ease(t);
-      const rad = (modelR + 0.85) * (1 - e);
-      // spin accelerates as they close — the wind-up
-      const spin = orbit + e * e * 9;
+    if(phase === PHASE.CHARGE){
+      const t = Math.min(phaseT / DUR.CHARGE, 1);
+      const e = easeIn(t);
 
-      orbRed.position.set( Math.cos(spin) * rad, chest, Math.sin(spin) * rad - 0.2 + e * 0.2);
-      orbBlue.position.set(-Math.cos(spin) * rad, chest, -Math.sin(spin) * rad - 0.2 + e * 0.2);
+      // spiral in, spin accelerating — the wind-up
+      const rad = idleR * (1 - e * 0.94);
+      const sp  = orbit + e * e * 13;
 
-      const s = 1.05 * (1 + e * 0.5);
+      orbRed.position.set( Math.cos(sp) * rad, chest,  Math.sin(sp) * rad);
+      orbBlue.position.set(-Math.cos(sp) * rad, chest, -Math.sin(sp) * rad);
+
+      const s = orbR * (1 + e * 0.85);
       orbRed.scale.setScalar(s);
       orbBlue.scale.setScalar(s);
 
-      if(t >= 1){ phase = PHASE.COLLAPSE; phaseT = 0; }
+      // Ramp stops at 2.4. Measured against the shader's actual output,
+      // internal noise detail peaks around 1.8-2.2 and is entirely gone
+      // by 3.8, where every fragment clips to white — pushing harder
+      // would just erase the churn this material exists to show.
+      matRed.uniforms.uPower.value  = 1.15 + e * 1.25;
+      matBlue.uniforms.uPower.value = 1.15 + e * 1.25;
+      matRed.uniforms.uChurn.value  = 1 + e * 5.5;
+      matBlue.uniforms.uChurn.value = 1 + e * 5.5;
+
+      orbRed.visible = orbBlue.visible = true;
+      orbPurp.visible = wave.visible = false;
+
+      streams.visible = true;
+      streamMat.uniforms.uProg.value = t;
+      streamMat.uniforms.uFade.value = Math.min(t * 3, 1) * (0.55 + t * 0.45);
+
+      punch += (-modelH * 0.30 * e - punch) * 0.14;   // creeps in
+      setFlash(e * 0.16);
+
+      if(t >= 1){ phase = PHASE.COLLAPSE; phaseT = 0; shake = 1; }
       return;
     }
 
     if(phase === PHASE.COLLAPSE){
       const t = Math.min(phaseT / DUR.COLLAPSE, 1);
+      const k = 1 - t;
 
-      // red and blue snap out; purple takes their place
-      orbRed.material.opacity = orbBlue.material.opacity = 1 - t;
-      orbRed.scale.setScalar(1.55 * (1 - t * 0.6));
-      orbBlue.scale.setScalar(1.55 * (1 - t * 0.6));
+      // red and blue are consumed; purple is born at the seam
+      orbRed.visible = orbBlue.visible = k > 0.02;
+      orbRed.position.set(0, chest, 0);
+      orbBlue.position.set(0, chest, 0);
+      orbRed.scale.setScalar(orbR * 1.85 * k);
+      orbBlue.scale.setScalar(orbR * 1.85 * k);
+      matRed.uniforms.uPower.value  = 2.4 * k;
+      matBlue.uniforms.uPower.value = 2.4 * k;
 
       orbPurp.visible = true;
       orbPurp.position.set(0, chest, 0);
-      orbPurp.scale.setScalar(0.2 + t * 2.1);
-      orbPurp.material.opacity = t;
+      orbPurp.scale.setScalar(orbR * (0.4 + easeOut(t) * 2.4));
+      // 3.4 is deliberately into the clipped range — the collapse is the
+      // one moment overexposure is the intent, and it lasts 190ms
+      matPurp.uniforms.uPower.value = 1.5 + t * 1.9;
+      matPurp.uniforms.uChurn.value = 7;
 
-      if(t >= 1){ phase = PHASE.RELEASE; phaseT = 0; }
+      streams.visible = false;
+      wave.visible = false;
+
+      punch += (modelH * 0.12 - punch) * 0.4;   // hard dolly punch
+      setFlash(0.16 + t * 0.58);
+
+      if(t >= 1){ phase = PHASE.BLOOM; phaseT = 0; }
       return;
     }
 
-    // RELEASE — purple holds a beat, then the ring expands outward
-    const t = Math.min(phaseT / DUR.RELEASE, 1);
+    // BLOOM — core settles back, shockwave goes out
+    const t  = Math.min(phaseT / DUR.BLOOM, 1);
+    const eo = easeOut(t);
 
-    orbPurp.visible = true;
+    orbRed.visible = orbBlue.visible = false;
+
+    orbPurp.visible = t < 0.96;
     orbPurp.position.set(0, chest, 0);
-    orbPurp.scale.setScalar(2.3 * (1 - t * 0.75));
-    orbPurp.material.opacity = 1 - t;
+    orbPurp.scale.setScalar(orbR * (2.8 - eo * 2.1));
+    // decays from the clipped peak back down through the band where the
+    // churn is visible again, so the core resolves as it fades
+    matPurp.uniforms.uPower.value = Math.max(0, 3.4 * (1 - easeInOut(t)));
+    matPurp.uniforms.uChurn.value = 7 - t * 5;
 
-    burst.visible = true;
-    burst.position.set(0, chest, 0);
-    burst.scale.setScalar(0.4 + ease(t) * 11);
-    burst.material.opacity = (1 - t) * 0.8;
+    wave.visible = true;
+    wave.position.set(0, chest, 0);
+    // The bright annulus sits at ~0.85 of the quad's half-span, so it
+    // crosses the viewport edge partway through the bloom. Expansion is
+    // therefore kept moderate and the fade steepened, so by the time it
+    // gets there it's dim enough that the mask can dissolve it without a
+    // visible band. Nothing ever terminates on a hard rectangle.
+    const span = modelH * (0.7 + eo * 5.5);
+    wave.scale.set(span, span, 1);
+    waveMat.uniforms.uProg.value    = eo;
+    waveMat.uniforms.uOpacity.value = Math.pow(1 - t, 2.1) * 1.15;
 
-    orbRed.material.opacity = orbBlue.material.opacity = 0;
+    streams.visible = false;
+
+    punch += (0 - punch) * 0.07;
+    setFlash(Math.pow(1 - t, 2.2) * 0.74);
 
     if(t >= 1){
       phase = PHASE.IDLE;
       phaseT = 0;
-      orbPurp.visible = burst.visible = false;
+      orbPurp.visible = wave.visible = false;
+      matPurp.uniforms.uPower.value = 0;
       wrap.classList.remove('charging');
+      setFlash(0);
     }
   }
 
-  /* ── loop ──────────────────────────────────────────────────────────
-     Paused when the hero is off-screen; capped to 30fps on mobile.
-     ───────────────────────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     LOOP — paused off-screen, capped to 30fps on mobile
+     ══════════════════════════════════════════════════════════════════ */
   let visible = true;
   if('IntersectionObserver' in window){
-    new IntersectionObserver((entries) => {
+    new IntersectionObserver(function(entries){
       visible = entries[0].isIntersecting;
-    }, { threshold: 0.15 }).observe(wrap);
+    }, { threshold: 0.05 }).observe(wrap);
   }
 
   const clock = new THREE.Clock();
   const FRAME_MS = mobile ? 33 : 16;
-  let lastFrame = 0;
-  let autoAngle = -0.35;                    // start on a 3/4 view
+  let lastFrame = 0, autoAngle = -0.35;
 
   function frame(now){
-    if(reduce) return;                      // static frame drawn on load
+    if(reduce) return;
     requestAnimationFrame(frame);
     if(!visible || !modelReady) return;
     if(now - lastFrame < FRAME_MS) return;
     lastFrame = now;
 
     const dt = Math.min(clock.getDelta(), 0.08);
-    autoAngle += dt * 0.16;                 // slow turntable
+    const t  = now * 0.001;
+
+    // auto-turntable plus whatever the user has dragged. Momentum bleeds
+    // off after release so a flick coasts instead of stopping dead.
+    autoAngle += dt * 0.16;
+    if(!down){
+      spin += spinV;
+      spinV *= 0.92;
+      if(Math.abs(spinV) < 1e-5) spinV = 0;
+    }
 
     rx += (tx - rx) * 0.06;
     ry += (-ty - ry) * 0.06;
 
-    updateEffect(dt);
+    updateEffect(dt, t);
 
-    const angle = autoAngle + rx * 0.7;     // cursor nudges the orbit
-    camera.position.x = Math.sin(angle) * RADIUS;
-    camera.position.z = Math.cos(angle) * RADIUS;
-    camera.position.y = LOOK.y + ry * TILT;
+    shake *= 0.86;
+    const jitter = shake * modelH * 0.012;
+
+    const angle = autoAngle + spin + rx * 0.55;
+    const dist  = RADIUS + punch;
+
+    camera.position.x = Math.sin(angle) * dist + (Math.random() - 0.5) * jitter;
+    camera.position.z = Math.cos(angle) * dist;
+    camera.position.y = LOOK.y + ry * TILT + (Math.random() - 0.5) * jitter;
     camera.lookAt(LOOK);
 
     renderer.render(scene, camera);
