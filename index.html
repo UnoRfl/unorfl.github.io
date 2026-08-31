@@ -316,14 +316,14 @@ section{padding:clamp(56px,9vw,110px) 0}
 /* The canvas spans the whole hero, edge to edge. This is what stops the
    effect from revealing its own container: a shockwave expanding inside
    a smaller box would clip on that box's sides and read as a frame sitting
-   on top of the page. Full-bleed means the only boundary it can ever reach
-   is the edge of the screen.
+   on top of the page.
 
-   The mask is the second half of that. It feathers the outer band of the
-   canvas to nothing, so anything still travelling when it gets there
-   dissolves instead of ending on a straight line. The figure sits well
-   inside the untouched centre — PAD in the camera fit keeps it there —
-   so the mask never touches the model itself. */
+   Left and right are already the screen edges, so only the top and bottom
+   need feathering — those are where the hero meets the rest of the page.
+   That means ONE mask layer. The earlier version intersected two gradients
+   with mask-composite, which iOS Safari handles badly enough to drop the
+   element entirely, and was the reason the scene never appeared on phones.
+   A single layer needs no compositing and is supported everywhere. */
 .hero-car{
   position:absolute;
   z-index:2;
@@ -333,14 +333,8 @@ section{padding:clamp(56px,9vw,110px) 0}
   pointer-events:none;
   opacity:0;
   transition:opacity 1.4s cubic-bezier(.22,.61,.36,1);
-  -webkit-mask-image:
-    linear-gradient(to right,  transparent 0%, #000 9%, #000 91%, transparent 100%),
-    linear-gradient(to bottom, transparent 0%, #000 7%, #000 93%, transparent 100%);
-          mask-image:
-    linear-gradient(to right,  transparent 0%, #000 9%, #000 91%, transparent 100%),
-    linear-gradient(to bottom, transparent 0%, #000 7%, #000 93%, transparent 100%);
-  -webkit-mask-composite:source-in;
-          mask-composite:intersect;
+  -webkit-mask-image:linear-gradient(to bottom, transparent 0%, #000 7%, #000 92%, transparent 100%);
+          mask-image:linear-gradient(to bottom, transparent 0%, #000 7%, #000 92%, transparent 100%);
 }
 .hero-car.in{opacity:1}
 #car-canvas{
@@ -397,6 +391,14 @@ section{padding:clamp(56px,9vw,110px) 0}
   box-shadow:0 0 30px -8px rgba(170,60,255,.65);
 }
 .car-meta[disabled]{opacity:.4;cursor:default}
+/* Retired after the technique has been used. It fades out rather than
+   sitting there greyed, because there is nothing left to press — the
+   interaction is deliberately one-shot until a reload. */
+.car-meta.spent{
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .9s ease .5s;
+}
 .car-meta .swatch{
   width:7px;height:7px;border-radius:50%;flex:none;
   transition:box-shadow .3s ease;
@@ -411,57 +413,51 @@ section{padding:clamp(56px,9vw,110px) 0}
   background:var(--purple);
   box-shadow:0 0 14px rgba(170,60,255,.95);
 }
-/* The loading readout borrows the trigger's pill so the two read as the
-   same system — the label simply becomes the control once the model is
-   there. The bar is determinate: it tracks real bytes rather than looping
-   a decorative shimmer, so a slow connection looks like progress instead
-   of a hang. */
+/* Tucked into the corner rather than sat over the middle of the stage.
+   Loading is peripheral information — it should not occupy the spot the
+   figure is about to appear in, and it should not be the thing your eye
+   lands on first. The bar is determinate: it tracks real bytes rather
+   than looping a decorative shimmer, so a slow connection reads as
+   progress instead of a hang. */
 .car-loading{
   position:absolute;
-  left:50%;top:50%;
-  transform:translate(-50%,-50%);
+  left:clamp(14px,4vw,40px);
+  bottom:clamp(16px,4vh,44px);
   z-index:4;
-  display:flex;flex-direction:column;align-items:center;gap:10px;
-  padding:14px 18px 12px;
-  border:1px solid var(--stroke);
-  border-radius:12px;
-  background:rgba(8,8,10,.6);
-  -webkit-backdrop-filter:blur(8px);
-          backdrop-filter:blur(8px);
-  opacity:1;transition:opacity .45s ease,transform .45s ease;
+  display:flex;flex-direction:column;align-items:flex-start;gap:7px;
+  opacity:1;transition:opacity .5s ease,transform .5s ease;
   pointer-events:none;
   white-space:nowrap;
 }
-.car-loading.out{opacity:0;transform:translate(-50%,-50%) scale(.96)}
+.car-loading.out{opacity:0;transform:translateY(6px)}
 .cl-row{
-  display:flex;align-items:baseline;gap:10px;
-  font-family:var(--font-m);font-size:10px;letter-spacing:.22em;
+  display:flex;align-items:baseline;gap:8px;
+  font-family:var(--font-m);font-size:9px;letter-spacing:.24em;
   color:var(--dim);
 }
-.cl-pct{color:var(--purple);font-variant-numeric:tabular-nums;letter-spacing:.1em}
+.cl-pct{color:var(--purple);font-variant-numeric:tabular-nums;letter-spacing:.08em}
 .cl-track{
   position:relative;
-  width:150px;height:2px;
+  width:104px;height:1px;
   background:var(--stroke);
-  border-radius:2px;
   overflow:hidden;
 }
 .cl-fill{
   position:absolute;inset:0 auto 0 0;
   width:0%;
   background:linear-gradient(90deg,#3C7BFF,var(--purple),#FF3C5A);
-  box-shadow:0 0 12px rgba(170,60,255,.7);
+  box-shadow:0 0 10px rgba(170,60,255,.75);
   transition:width .25s ease-out;
 }
 /* Indeterminate until the first progress event lands — some servers send
-   no length, and a bar frozen at zero reads as a failure. */
+   no content length, and a bar frozen at zero reads as a failure. */
 .cl-track.wait .cl-fill{
-  width:38%;
+  width:34%;
   animation:clsweep 1.15s ease-in-out infinite;
 }
 @keyframes clsweep{
   0%{transform:translateX(-115%)}
-  100%{transform:translateX(300%)}
+  100%{transform:translateX(320%)}
 }
 .car-loading.err .cl-pct{color:#FF3C5A}
 .car-loading.err .cl-track{display:none}
@@ -549,6 +545,14 @@ section{padding:clamp(56px,9vw,110px) 0}
      the shockwave would visibly terminate on them. Keeping it full-bleed
      means the only edge it can ever reach is the edge of the screen.
      Everything else in the hero becomes a normal column stacked over it. */
+  /* top-right on phones: bottom-left would sit under the content column,
+     and the mark already owns the top-left corner */
+  .car-loading{
+    left:auto;right:clamp(14px,4vw,24px);
+    top:2px;bottom:auto;
+    align-items:flex-end;
+  }
+  .car-loading.out{transform:translateY(-6px)}
   /* the trigger joins the column instead of floating, so it can never
      land on top of the role text or the footer at small heights */
   .car-meta{
@@ -915,7 +919,7 @@ footer{
       <button class="car-meta" id="cursed-trigger" type="button" disabled>
         <span class="swatch s-red" aria-hidden="true"></span>
         <span class="swatch s-blue" aria-hidden="true"></span>
-        <span>HOLLOW PURPLE</span>
+        <span>INTERACT</span>
       </button>
 
       <div id="cursed-flash" aria-hidden="true"></div>
@@ -1634,6 +1638,28 @@ footer{
                    (probe.getContext('webgl2') || probe.getContext('webgl')));
   if(!hasGL){ wrap.remove(); return; }
 
+  /* Report failures on the page rather than only to the console. On a
+     phone the console is effectively unreachable, so a silent failure
+     just looks like a permanent loading state — this way the chip says
+     what went wrong. */
+  function fail(msg){
+    if(!loading) return;
+    loading.classList.add('err');
+    if(clLabel) clLabel.textContent = msg;
+    if(clPct)   clPct.textContent = '!';
+    if(clTrack) clTrack.classList.remove('wait');
+  }
+
+  // a load that never resolves should not leave the chip spinning forever
+  const watchdog = setTimeout(function(){
+    if(!modelReady) fail('TIMED OUT');
+  }, 30000);
+
+  canvas.addEventListener('webglcontextlost', function(e){
+    e.preventDefault();
+    fail('CONTEXT LOST');
+  }, false);
+
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const mobile = window.matchMedia('(hover:none) and (pointer:coarse)').matches;
 
@@ -1646,11 +1672,7 @@ footer{
     ]);
   }catch(err){
     console.error('three.js import failed:', err);
-    if(loading){
-      loading.classList.add('err');
-      if(clLabel) clLabel.textContent = 'UNAVAILABLE';
-      if(clPct)   clPct.textContent = '!';
-    }
+    fail('ENGINE BLOCKED');
     return;
   }
 
@@ -1707,22 +1729,25 @@ footer{
 
   /* ══════════════════════════════════════════════════════════════════
      CURSED ENERGY
-     Two things make this read as energy rather than a marble.
+     Three things stop this reading as a static glowing ball.
 
-     First, domain warping: the noise lookup is displaced by a second
-     noise field, which curls smooth blobs into strands. Plain fbm gives
-     you clouds; warped fbm gives you filaments.
+     The silhouette moves. Vertices are displaced along their normals by
+     noise, so the outline undulates — measured, the radius swings about
+     28% and every point drifts continuously. A sphere whose outline never
+     changes will look like a marble no matter what the surface does.
 
-     Second, it is deliberately full of holes. Thin areas fall to zero
-     instead of filling in, so the sphere is a churning shell with gaps
-     rather than a solid disc — measured coverage is around 45%.
+     The surface flows. Domain warping (displacing the noise lookup by a
+     second noise field) curls smooth blobs into strands, and the whole
+     field is advected downward over time so the strands travel rather
+     than shimmer in place.
 
-     Blending is premultiplied (One/One) rather than three's
-     AdditiveBlending. AdditiveBlending is SrcAlpha/One, which multiplies
-     the colour by its own alpha, squaring the intensity — at power 2.4
-     that drove every fragment to pure white and lost the hue entirely.
-     Writing alpha 1.0 and letting One/One add the premultiplied colour
-     keeps the intensity linear and the colour intact.
+     It is full of holes. Thin areas fall to zero instead of filling in,
+     so this is a churning shell at roughly 45% coverage, not a disc.
+
+     Blending is premultiplied (One/One). three's AdditiveBlending is
+     SrcAlpha/One, which multiplies the colour by its own alpha and
+     squares the intensity — that is what drove every fragment to white
+     and turned these into solid balls.
      ══════════════════════════════════════════════════════════════════ */
   function energyMaterial(colour){
     return new THREE.ShaderMaterial({
@@ -1737,17 +1762,29 @@ footer{
         uTime:   { value: 0 },
         uColour: { value: colour.clone() },
         uPower:  { value: 1 },
-        uChurn:  { value: 1 }
+        uChurn:  { value: 1 },
+        uWobble: { value: 1 }
       },
-      vertexShader: [
-        'varying vec3 vNormalW;',
-        'varying vec3 vViewW;',
-        'varying vec3 vPosL;',
+      vertexShader: OCT + NOISE_GLSL + [
+        'uniform float uTime, uChurn, uWobble;',
+        'varying vec3  vNormalW;',
+        'varying vec3  vViewW;',
+        'varying vec3  vPosL;',
+        'varying float vDisp;',
         'void main(){',
-        '  vPosL    = position;',
+        '  float t = uTime * uChurn;',
+        // two scales of displacement: a slow swell and a finer ripple
+        '  float d1 = fbm(position * 1.9 + vec3(0.0, -t * 0.50, 0.0));',
+        '  float d2 = fbm(position * 3.7 + vec3(t * 0.35, 0.0, 0.0));',
+        '  float disp = (d1 - 0.5) * 0.42 + (d2 - 0.5) * 0.18;',
+        '  vDisp = disp;',
+        // sample the fragment noise in undisplaced space so the surface
+        // pattern doesn't swim against the geometry
+        '  vPosL = position;',
+        '  vec3 p = position * (1.0 + disp * uWobble);',
         '  vNormalW = normalize(mat3(modelMatrix) * normal);',
-        '  vec4 world = modelMatrix * vec4(position, 1.0);',
-        '  vViewW   = normalize(cameraPosition - world.xyz);',
+        '  vec4 world = modelMatrix * vec4(p, 1.0);',
+        '  vViewW = normalize(cameraPosition - world.xyz);',
         '  gl_Position = projectionMatrix * viewMatrix * world;',
         '}'
       ].join('\n'),
@@ -1756,30 +1793,32 @@ footer{
         'uniform vec3  uColour;',
         'uniform float uPower;',
         'uniform float uChurn;',
-        'varying vec3 vNormalW;',
-        'varying vec3 vViewW;',
-        'varying vec3 vPosL;',
+        'varying vec3  vNormalW;',
+        'varying vec3  vViewW;',
+        'varying vec3  vPosL;',
+        'varying float vDisp;',
         'void main(){',
         '  float ndv = clamp(dot(normalize(vNormalW), normalize(vViewW)), 0.0, 1.0);',
         '  float t = uTime * uChurn;',
         '  vec3 q = vPosL * 2.6;',
-        // the warp — three noise lookups displacing a fourth
         '  vec3 warp = vec3(',
         '    fbm(q + vec3(0.0,  t * 0.30, 0.0)),',
         '    fbm(q + vec3(5.2,  t * 0.25, 1.3)),',
         '    fbm(q + vec3(9.1, -t * 0.20, 4.7))',
         '  );',
-        '  float n = fbm(q + warp * 1.9 + vec3(0.0, -t * 0.45, 0.0));',
-        // sharpen into strands with real gaps between them
-        '  float strand = pow(smoothstep(0.34, 0.70, n), 1.5);',
-        // hollow shell — brightest around the silhouette, not the middle
-        '  float shell = pow(1.0 - ndv, 1.7) * 1.35 + 0.22;',
-        '  float core  = strand * pow(ndv, 1.7) * 0.75;',
-        '  float i = (shell * strand * 1.5 + core) * uPower;',
-        // wisp-out: thin areas vanish rather than filling in
-        '  i *= smoothstep(0.04, 0.26, strand + (1.0 - ndv) * 0.28);',
-        // brighten along the strands without washing to white
-        '  vec3 col = uColour * (1.0 + strand * 0.25);',
+        // advected downward so the strands travel across the surface
+        '  float n = fbm(q + warp * 2.2 + vec3(0.0, -t * 0.55, 0.0));',
+        '  float strand = pow(smoothstep(0.32, 0.68, n), 1.4);',
+        // shell is weaker than before — less halo, more filament
+        '  float shell = pow(1.0 - ndv, 1.5) * 0.95 + 0.18;',
+        // crests of the displaced surface catch the light, which is what
+        // makes the motion legible rather than just a wobbling outline
+        '  float crest = smoothstep(-0.05, 0.28, vDisp);',
+        '  float i = (shell * strand * 1.35',
+        '           + strand * pow(ndv, 1.7) * 0.50',
+        '           + crest * strand * 0.80) * uPower;',
+        '  i *= smoothstep(0.03, 0.24, strand + (1.0 - ndv) * 0.26);',
+        '  vec3 col = uColour * (1.0 + strand * 0.22);',
         '  gl_FragColor = vec4(col * i, 1.0);',
         '}'
       ].join('\n')
@@ -1948,14 +1987,24 @@ footer{
 
   /* ══════════════════════════════════════════════════════════════════
      TOPOGRAPHIC BACKDROP
-     The aftermath. When Hollow Purple releases, a contour map is drawn
-     across the background by an expanding wavefront, then fades — as if
-     the release left a survey of the space it displaced.
+     Two lives. First it is the drawback: when Hollow Purple releases, a
+     contour map is drawn outward across the background by a wavefront.
+     After that it never leaves — the map stays embedded at a low ambient
+     level and pulses at random intervals, sometimes radially, sometimes
+     as a sweep across an arbitrary axis.
 
-     Rendered as its own orthographic pass before the main scene, with
-     autoClear off. That keeps it genuinely behind the figure at any
-     camera angle, which a plane inside the perspective scene could not
-     guarantee without constantly repositioning it.
+     uReveal blends between those. At 1 the map only exists behind the
+     advancing front (the drawback being drawn); at 0 the whole map is
+     present at uBase and the front is just a travelling highlight.
+
+     Rendered as its own orthographic pass before the main scene with
+     autoClear off, which keeps it genuinely behind the figure at any
+     camera angle.
+
+     Two octaves rather than four: contour lines quantise the height
+     field anyway, so the extra detail is invisible, and this shader runs
+     fullscreen on every frame once ambient — the cheapest version that
+     looks right is the correct one.
      ══════════════════════════════════════════════════════════════════ */
   const topoMat = new THREE.ShaderMaterial({
     transparent: true,
@@ -1967,8 +2016,13 @@ footer{
     depthTest: false,
     uniforms: {
       uTime:   { value: 0 },
-      uWave:   { value: 0 },      // wavefront radius
-      uFade:   { value: 0 },      // master opacity
+      uWave:   { value: 0 },      // wavefront position along uCoord
+      uAmp:    { value: 0 },      // brightness of the travelling front
+      uBase:   { value: 0 },      // ambient level of the whole map
+      uReveal: { value: 1 },      // 1 = drawing on, 0 = already embedded
+      uLinear: { value: 0 },      // 0 = radial front, 1 = swept front
+      uDir:    { value: new THREE.Vector2(1, 0) },
+      uFade:   { value: 0 },
       uAspect: { value: 1 },
       uColour: { value: PURP.clone() }
     },
@@ -1979,24 +2033,28 @@ footer{
       '  gl_Position = vec4(position.xy * 2.0, 0.0, 1.0);',
       '}'
     ].join('\n'),
-    fragmentShader: OCT + NOISE_GLSL + [
-      'uniform float uTime, uWave, uFade, uAspect;',
+    fragmentShader: '#define OCTAVES 2\n' + NOISE_GLSL + [
+      'uniform float uTime, uWave, uAmp, uBase, uReveal, uLinear, uFade, uAspect;',
+      'uniform vec2  uDir;',
       'uniform vec3  uColour;',
       'varying vec2 vUv;',
       'void main(){',
       '  if(uFade <= 0.001){ discard; }',
       '  vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);',
-      '  float d = length(p);',
       '  float h = fbm(vec3(p * 2.3, uTime * 0.04));',
       // One contour per height interval. No fwidth: it needs a
       // derivatives extension on WebGL1, and for a decorative backdrop a
       // fixed width is indistinguishable and portable.
       '  float tri  = abs(fract(h * 15.0) - 0.5) * 2.0;',
       '  float line = smoothstep(0.30, 0.0, tri);',
-      // inside the front the map is drawn; the front itself is brighter
-      '  float inside = smoothstep(uWave, uWave - 0.42, d);',
-      '  float edge   = smoothstep(0.08, 0.0, abs(d - uWave));',
-      '  float i = (line * inside * 0.55 + line * edge * 1.6 + edge * 0.10) * uFade;',
+      // the front runs along either radius or an arbitrary axis
+      '  float radial = length(p);',
+      '  float swept  = dot(p, normalize(uDir)) * 0.62 + 0.5;',
+      '  float coord  = mix(radial, swept, uLinear);',
+      // during the reveal, only what the front has passed is drawn
+      '  float drawn = mix(1.0, smoothstep(uWave, uWave - 0.42, coord), uReveal);',
+      '  float front = smoothstep(0.17, 0.0, abs(coord - uWave));',
+      '  float i = (line * uBase * drawn + line * front * uAmp + front * uAmp * 0.06) * uFade;',
       '  gl_FragColor = vec4(uColour * i, 1.0);',
       '}'
     ].join('\n')
@@ -2074,6 +2132,7 @@ footer{
       modelReady = true;
       fit();
 
+      clearTimeout(watchdog);
       wrap.classList.add('in');
       if(loading){
         // land the bar on 100 before dismissing, so it never fades out
@@ -2101,11 +2160,8 @@ footer{
     },
     function(err){
       console.error('model load failed:', err);
-      if(loading){
-        loading.classList.add('err');
-        if(clLabel) clLabel.textContent = 'UNAVAILABLE';
-        if(clPct)   clPct.textContent = '!';
-      }
+      clearTimeout(watchdog);
+      fail('UNAVAILABLE');
     }
   );
 
@@ -2237,12 +2293,58 @@ footer{
      Phase is driven by one elapsed-time value rather than nested
      timeouts, so it can't leave a stray timer or land half-finished.
      ══════════════════════════════════════════════════════════════════ */
-  const PHASE = { IDLE:0, CHARGE:1, COLLAPSE:2, BLOOM:3 };
+  const PHASE = { IDLE:0, CHARGE:1, COLLAPSE:2, BLOOM:3, AMBIENT:4 };
   const DUR   = { CHARGE:1000, COLLAPSE:190, BLOOM:1250 };
 
   let phase = PHASE.IDLE, phaseT = 0, orbit = 0;
   let punch = 0;        // camera dolly kick, world units
   let shake = 0;        // decaying positional jitter
+
+  /* AMBIENT is terminal. Once the technique has been used the orbs are
+     gone for good and the contour map is simply part of the background,
+     breathing at random. Only a reload brings the orbs back — which makes
+     the one-shot feel like something that actually happened rather than a
+     button that replays. */
+  let waveT = 0, waveDur = 0, waveWait = 0;
+  let waveFrom = 0, waveTo = 1;
+  let waveLinear = 0;
+  const waveDir = new THREE.Vector2(1, 0);
+
+  function scheduleWave(){
+    // random gap, so the background never falls into a visible rhythm
+    waveWait = 3.5 + Math.random() * 8.0;
+    waveT = -1;
+  }
+
+  function beginWave(){
+    waveLinear = Math.random() < 0.55 ? 1 : 0;    // swept vs radial
+    waveDur    = 2.4 + Math.random() * 2.2;
+    waveT      = 0;
+
+    if(waveLinear){
+      const a = Math.random() * Math.PI * 2;      // any axis, not just L-R
+      waveDir.set(Math.cos(a), Math.sin(a));
+    }
+    topoMat.uniforms.uLinear.value = waveLinear;
+    topoMat.uniforms.uDir.value.copy(waveDir);
+
+    /* Travel bounds come from the viewport's real extent rather than a
+       fixed number. The coordinate the front moves along tops out at very
+       different values depending on aspect — about 0.97 on a wide desktop
+       but only 0.57 on a portrait phone — so a hardcoded range would make
+       the wave finish halfway through its duration and then sit still for
+       the rest of it. */
+    const half = Math.hypot(camera.aspect / 2, 0.5);
+    const lo = waveLinear ? 0.5 - half * 0.62 : 0;
+    const hi = waveLinear ? 0.5 + half * 0.62 : half;
+    const pad = 0.18;
+
+    if(Math.random() < 0.4){                      // reversed
+      waveFrom = hi + pad; waveTo = lo - pad;
+    }else{
+      waveFrom = lo - pad; waveTo = hi + pad;
+    }
+  }
 
   function easeInOut(t){ return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
   function easeOut(t){ return 1 - Math.pow(1 - t, 3); }
@@ -2270,6 +2372,33 @@ footer{
     waveMat.uniforms.uTime.value = now;
 
     wave.quaternion.copy(camera.quaternion);   // always faces the camera
+
+    if(phase === PHASE.AMBIENT){
+      // the orbs are spent; only the map remains
+      orbRed.visible = orbBlue.visible = orbPurp.visible = false;
+      streams.visible = wave.visible = false;
+      punch += (0 - punch) * 0.08;
+      setFlash(0);
+
+      const u = topoMat.uniforms;
+      u.uReveal.value = 0;      // fully drawn, no longer being revealed
+      u.uFade.value   = 1;
+      u.uBase.value   = 0.17;   // the map's resting presence
+
+      if(waveT < 0){
+        waveWait -= dt;
+        u.uAmp.value = 0;
+        if(waveWait <= 0) beginWave();
+      }else{
+        waveT += dt;
+        const k = Math.min(waveT / waveDur, 1);
+        u.uWave.value = waveFrom + (waveTo - waveFrom) * k;
+        // the front swells and subsides rather than snapping on and off
+        u.uAmp.value = Math.sin(Math.PI * k) * 0.85;
+        if(k >= 1) scheduleWave();
+      }
+      return;
+    }
 
     if(phase === PHASE.IDLE){
       orbit += dt * 0.5;
@@ -2395,24 +2524,34 @@ footer{
 
     streams.visible = false;
 
-    // The drawback. The contour map is revealed by its own wavefront,
-    // running slightly ahead of the shockwave so the lines appear to be
-    // uncovered by it, then lingers and fades after the wave is gone.
-    topoMat.uniforms.uWave.value = eo * 1.45;
-    topoMat.uniforms.uFade.value =
-      Math.min(t / 0.12, 1) * Math.pow(1 - Math.max(0, (t - 0.30) / 0.70), 1.8);
+    // The drawback being drawn. The reveal front runs slightly ahead of
+    // the shockwave so the contours look uncovered by it. uBase ramps to
+    // its resting level rather than fading out — the map is not a flourish
+    // that disappears, it stays.
+    const tu = topoMat.uniforms;
+    tu.uReveal.value = 1;
+    tu.uLinear.value = 0;
+    tu.uFade.value   = Math.min(t / 0.10, 1);
+    tu.uWave.value   = eo * 1.45;
+    tu.uAmp.value    = 1.5 * (1 - t);
+    tu.uBase.value   = 0.17 + (1 - t) * 0.5;
 
     punch += (0 - punch) * 0.07;
     setFlash(Math.pow(1 - t, 2.2) * 0.74);
 
     if(t >= 1){
-      phase = PHASE.IDLE;
+      // terminal — no return to IDLE, so the orbs do not come back
+      phase = PHASE.AMBIENT;
       phaseT = 0;
       orbPurp.visible = wave.visible = false;
       matPurp.uniforms.uPower.value = 0;
-      topoMat.uniforms.uFade.value = 0;
+      scheduleWave();
       wrap.classList.remove('charging');
       setFlash(0);
+      if(trigger){
+        trigger.setAttribute('disabled', '');
+        trigger.classList.add('spent');
+      }
     }
   }
 
