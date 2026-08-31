@@ -411,25 +411,60 @@ section{padding:clamp(56px,9vw,110px) 0}
   background:var(--purple);
   box-shadow:0 0 14px rgba(170,60,255,.95);
 }
+/* The loading readout borrows the trigger's pill so the two read as the
+   same system — the label simply becomes the control once the model is
+   there. The bar is determinate: it tracks real bytes rather than looping
+   a decorative shimmer, so a slow connection looks like progress instead
+   of a hang. */
 .car-loading{
   position:absolute;
   left:50%;top:50%;
   transform:translate(-50%,-50%);
   z-index:4;
-  display:flex;align-items:center;justify-content:center;
-  font-family:var(--font-m);font-size:11px;letter-spacing:.24em;color:var(--dim);
-  opacity:1;transition:opacity .45s ease;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:14px 18px 12px;
+  border:1px solid var(--stroke);
+  border-radius:12px;
+  background:rgba(8,8,10,.6);
+  -webkit-backdrop-filter:blur(8px);
+          backdrop-filter:blur(8px);
+  opacity:1;transition:opacity .45s ease,transform .45s ease;
   pointer-events:none;
   white-space:nowrap;
 }
-.car-loading.out{opacity:0}
-.car-loading .bar{
-  display:inline-block;width:80px;height:1px;
-  background:linear-gradient(90deg,transparent,var(--purple),transparent);
-  margin-left:14px;background-size:200% 100%;
-  animation:carload 1.4s linear infinite;
+.car-loading.out{opacity:0;transform:translate(-50%,-50%) scale(.96)}
+.cl-row{
+  display:flex;align-items:baseline;gap:10px;
+  font-family:var(--font-m);font-size:10px;letter-spacing:.22em;
+  color:var(--dim);
 }
-@keyframes carload{from{background-position:200% 0}to{background-position:-200% 0}}
+.cl-pct{color:var(--purple);font-variant-numeric:tabular-nums;letter-spacing:.1em}
+.cl-track{
+  position:relative;
+  width:150px;height:2px;
+  background:var(--stroke);
+  border-radius:2px;
+  overflow:hidden;
+}
+.cl-fill{
+  position:absolute;inset:0 auto 0 0;
+  width:0%;
+  background:linear-gradient(90deg,#3C7BFF,var(--purple),#FF3C5A);
+  box-shadow:0 0 12px rgba(170,60,255,.7);
+  transition:width .25s ease-out;
+}
+/* Indeterminate until the first progress event lands — some servers send
+   no length, and a bar frozen at zero reads as a failure. */
+.cl-track.wait .cl-fill{
+  width:38%;
+  animation:clsweep 1.15s ease-in-out infinite;
+}
+@keyframes clsweep{
+  0%{transform:translateX(-115%)}
+  100%{transform:translateX(300%)}
+}
+.car-loading.err .cl-pct{color:#FF3C5A}
+.car-loading.err .cl-track{display:none}
 
 /* layer 3 — the marginalia */
 .hero-role{
@@ -870,7 +905,13 @@ footer{
       <!-- Kept as siblings of the canvas, not children: .hero-car carries
            the edge mask that feathers the effect out, and anything inside
            it would be feathered too. -->
-      <div class="car-loading" id="car-loading">LOADING ASSET<span class="bar" aria-hidden="true"></span></div>
+      <div class="car-loading" id="car-loading" role="status" aria-live="polite">
+        <div class="cl-row">
+          <span id="cl-label">SUMMONING</span>
+          <span class="cl-pct" id="cl-pct">—</span>
+        </div>
+        <div class="cl-track wait" id="cl-track"><span class="cl-fill" id="cl-fill"></span></div>
+      </div>
       <button class="car-meta" id="cursed-trigger" type="button" disabled>
         <span class="swatch s-red" aria-hidden="true"></span>
         <span class="swatch s-blue" aria-hidden="true"></span>
@@ -1580,6 +1621,10 @@ footer{
   const wrap    = document.getElementById('car');
   const canvas  = document.getElementById('car-canvas');
   const loading = document.getElementById('car-loading');
+  const clPct   = document.getElementById('cl-pct');
+  const clFill  = document.getElementById('cl-fill');
+  const clTrack = document.getElementById('cl-track');
+  const clLabel = document.getElementById('cl-label');
   const trigger = document.getElementById('cursed-trigger');
   const flash   = document.getElementById('cursed-flash');
   if(!wrap || !canvas) return;
@@ -1601,7 +1646,11 @@ footer{
     ]);
   }catch(err){
     console.error('three.js import failed:', err);
-    if(loading) loading.textContent = 'ASSET OFFLINE';
+    if(loading){
+      loading.classList.add('err');
+      if(clLabel) clLabel.textContent = 'UNAVAILABLE';
+      if(clPct)   clPct.textContent = '!';
+    }
     return;
   }
 
@@ -1657,25 +1706,38 @@ footer{
   const OCT = '#define OCTAVES ' + (mobile ? 2 : 4) + '\n';
 
   /* ══════════════════════════════════════════════════════════════════
-     ENERGY SPHERE
-     An additive shell, not a flat sprite. Because every fragment on a
-     sphere sits at the same radius, depth can't come from distance to
-     the centre — it comes from how directly the fragment faces the
-     camera. Fragments facing us read as the hot core, fragments at the
-     silhouette read as the rim, and animated fbm breaks up both so the
-     ball churns instead of sitting there as a smooth blob.
+     CURSED ENERGY
+     Two things make this read as energy rather than a marble.
+
+     First, domain warping: the noise lookup is displaced by a second
+     noise field, which curls smooth blobs into strands. Plain fbm gives
+     you clouds; warped fbm gives you filaments.
+
+     Second, it is deliberately full of holes. Thin areas fall to zero
+     instead of filling in, so the sphere is a churning shell with gaps
+     rather than a solid disc — measured coverage is around 45%.
+
+     Blending is premultiplied (One/One) rather than three's
+     AdditiveBlending. AdditiveBlending is SrcAlpha/One, which multiplies
+     the colour by its own alpha, squaring the intensity — at power 2.4
+     that drove every fragment to pure white and lost the hue entirely.
+     Writing alpha 1.0 and letting One/One add the premultiplied colour
+     keeps the intensity linear and the colour intact.
      ══════════════════════════════════════════════════════════════════ */
   function energyMaterial(colour){
     return new THREE.ShaderMaterial({
       transparent: true,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneFactor,
+      blendEquation: THREE.AddEquation,
       depthWrite: false,
       side: THREE.DoubleSide,
       uniforms: {
         uTime:   { value: 0 },
         uColour: { value: colour.clone() },
-        uPower:  { value: 1 },      // overall intensity, driven per phase
-        uChurn:  { value: 1 }       // noise speed — rises during wind-up
+        uPower:  { value: 1 },
+        uChurn:  { value: 1 }
       },
       vertexShader: [
         'varying vec3 vNormalW;',
@@ -1699,20 +1761,26 @@ footer{
         'varying vec3 vPosL;',
         'void main(){',
         '  float ndv = clamp(dot(normalize(vNormalW), normalize(vViewW)), 0.0, 1.0);',
-        // two fbm layers drifting against each other so the pattern
-        // never visibly repeats
-        '  vec3  q  = vPosL * 3.4 + vec3(0.0, uTime * 0.55 * uChurn, 0.0);',
-        '  float n1 = fbm(q);',
-        '  float n2 = fbm(vPosL * 6.1 - vec3(uTime * 0.4 * uChurn, 0.0, 0.0));',
-        '  float n  = mix(n1, n2, 0.45);',
-        '  float core = pow(ndv, 3.0) * (0.55 + n * 0.9);',
-        '  float rim  = pow(1.0 - ndv, 2.4) * 1.5;',
-        // thin bright veins through the body
-        '  float vein = smoothstep(0.62, 0.78, n) * pow(ndv, 1.2) * 1.1;',
-        '  float i = (core + rim + vein) * uPower;',
-        // hot centre desaturates toward white, like a real overexposure
-        '  vec3 col = mix(uColour, vec3(1.0), clamp(i - 1.05, 0.0, 0.75));',
-        '  gl_FragColor = vec4(col * i, i);',
+        '  float t = uTime * uChurn;',
+        '  vec3 q = vPosL * 2.6;',
+        // the warp — three noise lookups displacing a fourth
+        '  vec3 warp = vec3(',
+        '    fbm(q + vec3(0.0,  t * 0.30, 0.0)),',
+        '    fbm(q + vec3(5.2,  t * 0.25, 1.3)),',
+        '    fbm(q + vec3(9.1, -t * 0.20, 4.7))',
+        '  );',
+        '  float n = fbm(q + warp * 1.9 + vec3(0.0, -t * 0.45, 0.0));',
+        // sharpen into strands with real gaps between them
+        '  float strand = pow(smoothstep(0.34, 0.70, n), 1.5);',
+        // hollow shell — brightest around the silhouette, not the middle
+        '  float shell = pow(1.0 - ndv, 1.7) * 1.35 + 0.22;',
+        '  float core  = strand * pow(ndv, 1.7) * 0.75;',
+        '  float i = (shell * strand * 1.5 + core) * uPower;',
+        // wisp-out: thin areas vanish rather than filling in
+        '  i *= smoothstep(0.04, 0.26, strand + (1.0 - ndv) * 0.28);',
+        // brighten along the strands without washing to white
+        '  vec3 col = uColour * (1.0 + strand * 0.25);',
+        '  gl_FragColor = vec4(col * i, 1.0);',
         '}'
       ].join('\n')
     });
@@ -1739,7 +1807,14 @@ footer{
      ══════════════════════════════════════════════════════════════════ */
   const waveMat = new THREE.ShaderMaterial({
     transparent: true,
-    blending: THREE.AdditiveBlending,
+    // premultiplied, for the same reason as the energy material: three's
+    // AdditiveBlending would multiply the colour by its own alpha and
+    // apply uOpacity twice, so the ring would fade on a curve rather
+    // than the linear one the timing is tuned against
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,
+    blendEquation: THREE.AddEquation,
     depthWrite: false,
     depthTest: false,
     side: THREE.DoubleSide,
@@ -1779,7 +1854,7 @@ footer{
       '  float wash = smoothstep(edge, 0.0, r) * 0.16 * (1.0 - uProg);',
       '  vec3 col = vec3(cr, cg, cb) * uColour + vec3(cg) * 0.55 + uColour * wash;',
       '  float i  = (max(max(cr, cg), cb) + wash) * uOpacity;',
-      '  gl_FragColor = vec4(col * uOpacity, i);',
+      '  gl_FragColor = vec4(col * uOpacity, 1.0);',
       '}'
     ].join('\n')
   });
@@ -1808,7 +1883,13 @@ footer{
 
   const streamMat = new THREE.ShaderMaterial({
     transparent: true,
-    blending: THREE.AdditiveBlending,
+    // premultiplied, as with the other additive materials — under
+    // SrcAlpha/One a faint particle would be dimmed by its own alpha a
+    // second time and the trails would all but vanish
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,
+    blendEquation: THREE.AddEquation,
     depthWrite: false,
     uniforms: {
       uProg:   { value: 0 },
@@ -1856,7 +1937,7 @@ footer{
       '  float d = length(gl_PointCoord - 0.5) * 2.0;',
       '  float f = pow(smoothstep(1.0, 0.0, d), 1.8);',
       '  float a = f * vAlpha * uFade;',
-      '  gl_FragColor = vec4(vCol * a * 2.2, a);',
+      '  gl_FragColor = vec4(vCol * a * 2.2, 1.0);',
       '}'
     ].join('\n')
   });
@@ -1864,6 +1945,69 @@ footer{
   const streams = new THREE.Points(streamGeo, streamMat);
   streams.visible = false;
   scene.add(streams);
+
+  /* ══════════════════════════════════════════════════════════════════
+     TOPOGRAPHIC BACKDROP
+     The aftermath. When Hollow Purple releases, a contour map is drawn
+     across the background by an expanding wavefront, then fades — as if
+     the release left a survey of the space it displaced.
+
+     Rendered as its own orthographic pass before the main scene, with
+     autoClear off. That keeps it genuinely behind the figure at any
+     camera angle, which a plane inside the perspective scene could not
+     guarantee without constantly repositioning it.
+     ══════════════════════════════════════════════════════════════════ */
+  const topoMat = new THREE.ShaderMaterial({
+    transparent: true,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,
+    blendEquation: THREE.AddEquation,
+    depthWrite: false,
+    depthTest: false,
+    uniforms: {
+      uTime:   { value: 0 },
+      uWave:   { value: 0 },      // wavefront radius
+      uFade:   { value: 0 },      // master opacity
+      uAspect: { value: 1 },
+      uColour: { value: PURP.clone() }
+    },
+    vertexShader: [
+      'varying vec2 vUv;',
+      'void main(){',
+      '  vUv = uv;',
+      '  gl_Position = vec4(position.xy * 2.0, 0.0, 1.0);',
+      '}'
+    ].join('\n'),
+    fragmentShader: OCT + NOISE_GLSL + [
+      'uniform float uTime, uWave, uFade, uAspect;',
+      'uniform vec3  uColour;',
+      'varying vec2 vUv;',
+      'void main(){',
+      '  if(uFade <= 0.001){ discard; }',
+      '  vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);',
+      '  float d = length(p);',
+      '  float h = fbm(vec3(p * 2.3, uTime * 0.04));',
+      // One contour per height interval. No fwidth: it needs a
+      // derivatives extension on WebGL1, and for a decorative backdrop a
+      // fixed width is indistinguishable and portable.
+      '  float tri  = abs(fract(h * 15.0) - 0.5) * 2.0;',
+      '  float line = smoothstep(0.30, 0.0, tri);',
+      // inside the front the map is drawn; the front itself is brighter
+      '  float inside = smoothstep(uWave, uWave - 0.42, d);',
+      '  float edge   = smoothstep(0.08, 0.0, abs(d - uWave));',
+      '  float i = (line * inside * 0.55 + line * edge * 1.6 + edge * 0.10) * uFade;',
+      '  gl_FragColor = vec4(uColour * i, 1.0);',
+      '}'
+    ].join('\n')
+  });
+
+  const topoScene = new THREE.Scene();
+  const topoCam   = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  topoScene.add(new THREE.Mesh(new THREE.PlaneGeometry(1, 1), topoMat));
+
+  // the main pass must not wipe the backdrop
+  renderer.autoClear = false;
 
   /* ── contact shadow ─────────────────────────────────────────────── */
   function radialTexture(stops){
@@ -1932,22 +2076,36 @@ footer{
 
       wrap.classList.add('in');
       if(loading){
-        loading.classList.add('out');
-        setTimeout(function(){ loading.remove(); }, 500);
+        // land the bar on 100 before dismissing, so it never fades out
+        // mid-fill and look like it gave up
+        if(clTrack) clTrack.classList.remove('wait');
+        if(clFill)  clFill.style.width = '100%';
+        if(clPct)   clPct.textContent = '100%';
+        setTimeout(function(){ loading.classList.add('out'); }, 180);
+        setTimeout(function(){ loading.remove(); }, 700);
       }
       if(trigger) trigger.removeAttribute('disabled');
 
-      if(reduce) renderer.render(scene, camera);
+      // autoClear is off for the two-pass render, so static frames must
+      // clear for themselves
+      if(reduce){ renderer.clear(); renderer.render(scene, camera); }
     },
     function(ev){
-      if(loading && ev && ev.lengthComputable){
-        const pct = Math.round((ev.loaded / ev.total) * 100);
-        loading.firstChild.nodeValue = 'LOADING ASSET · ' + pct + '% ';
-      }
+      if(!ev || !ev.lengthComputable || !clFill) return;
+      // real bytes — switch the track out of its indeterminate sweep the
+      // moment we know the total
+      if(clTrack) clTrack.classList.remove('wait');
+      const pct = Math.min(100, Math.round((ev.loaded / ev.total) * 100));
+      clFill.style.width = pct + '%';
+      if(clPct) clPct.textContent = pct + '%';
     },
     function(err){
       console.error('model load failed:', err);
-      if(loading) loading.textContent = 'ASSET OFFLINE';
+      if(loading){
+        loading.classList.add('err');
+        if(clLabel) clLabel.textContent = 'UNAVAILABLE';
+        if(clPct)   clPct.textContent = '!';
+      }
     }
   );
 
@@ -1985,8 +2143,9 @@ footer{
 
     RADIUS = Math.max(dV, dH);
     LOOK.set(0, modelH / 2, 0);
+    topoMat.uniforms.uAspect.value = camera.aspect;
 
-    if(reduce && modelReady) renderer.render(scene, camera);
+    if(reduce && modelReady){ renderer.clear(); renderer.render(scene, camera); }
   }
 
   if('ResizeObserver' in window){
@@ -2130,6 +2289,7 @@ footer{
 
       orbRed.visible = orbBlue.visible = true;
       orbPurp.visible = wave.visible = streams.visible = false;
+      topoMat.uniforms.uFade.value = 0;
       punch += (0 - punch) * 0.08;
       setFlash(0);
       return;
@@ -2152,10 +2312,11 @@ footer{
       orbRed.scale.setScalar(s);
       orbBlue.scale.setScalar(s);
 
-      // Ramp stops at 2.4. Measured against the shader's actual output,
-      // internal noise detail peaks around 1.8-2.2 and is entirely gone
-      // by 3.8, where every fragment clips to white — pushing harder
-      // would just erase the churn this material exists to show.
+      // Ramp stops at 2.4. With the warped-filament shader this stays
+      // saturated (measured centre-hue 0.68 at 2.4, versus 0.00 for the
+      // old solid-ball version, which is what turned them into white
+      // marbles). Churn rises faster than power so the wind-up reads as
+      // the strands accelerating rather than simply getting brighter.
       matRed.uniforms.uPower.value  = 1.15 + e * 1.25;
       matBlue.uniforms.uPower.value = 1.15 + e * 1.25;
       matRed.uniforms.uChurn.value  = 1 + e * 5.5;
@@ -2234,6 +2395,13 @@ footer{
 
     streams.visible = false;
 
+    // The drawback. The contour map is revealed by its own wavefront,
+    // running slightly ahead of the shockwave so the lines appear to be
+    // uncovered by it, then lingers and fades after the wave is gone.
+    topoMat.uniforms.uWave.value = eo * 1.45;
+    topoMat.uniforms.uFade.value =
+      Math.min(t / 0.12, 1) * Math.pow(1 - Math.max(0, (t - 0.30) / 0.70), 1.8);
+
     punch += (0 - punch) * 0.07;
     setFlash(Math.pow(1 - t, 2.2) * 0.74);
 
@@ -2242,6 +2410,7 @@ footer{
       phaseT = 0;
       orbPurp.visible = wave.visible = false;
       matPurp.uniforms.uPower.value = 0;
+      topoMat.uniforms.uFade.value = 0;
       wrap.classList.remove('charging');
       setFlash(0);
     }
@@ -2296,6 +2465,14 @@ footer{
     camera.position.y = LOOK.y + ry * TILT + (Math.random() - 0.5) * jitter;
     camera.lookAt(LOOK);
 
+    topoMat.uniforms.uTime.value = t;
+
+    // autoClear is off, so clear once here and lay the backdrop down
+    // before the figure. Skipped entirely while the backdrop is inert.
+    renderer.clear();
+    if(topoMat.uniforms.uFade.value > 0.001){
+      renderer.render(topoScene, topoCam);
+    }
     renderer.render(scene, camera);
   }
   requestAnimationFrame(frame);
