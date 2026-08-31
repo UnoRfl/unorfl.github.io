@@ -391,14 +391,6 @@ section{padding:clamp(56px,9vw,110px) 0}
   box-shadow:0 0 30px -8px rgba(170,60,255,.65);
 }
 .car-meta[disabled]{opacity:.4;cursor:default}
-/* Retired after the technique has been used. It fades out rather than
-   sitting there greyed, because there is nothing left to press — the
-   interaction is deliberately one-shot until a reload. */
-.car-meta.spent{
-  opacity:0;
-  pointer-events:none;
-  transition:opacity .9s ease .5s;
-}
 .car-meta .swatch{
   width:7px;height:7px;border-radius:50%;flex:none;
   transition:box-shadow .3s ease;
@@ -593,38 +585,48 @@ section{padding:clamp(56px,9vw,110px) 0}
    Per-character is identical output (the ramp is vertical and every
    character shares a baseline) and each span invalidates its own fill.
    ─────────────────────────────────────────────────────────────────── */
-/* Three background layers, clipped to the glyphs:
+/* Four background layers, clipped to the glyphs:
 
-     1. the wave highlight — a band that sweeps the line when the
-        backdrop pulses, so the name is part of the same weather
-     2. the contour map — the same topographic idea as the backdrop but
-        drawn much finer, since it has to survive inside letterforms
-     3. the original vertical gradient
+     1,2. the wave highlight — TWO bands, because a radial front crosses a
+          horizontal line in two places and collapsing that to one band
+          would read as a wave going the wrong way on half the name. A
+          swept front only uses the first; the second sits at zero alpha.
+     3.   the contour map — cut from the same terrain as the backdrop
+     4.   the original vertical gradient
 
-   Layers 1 and 2 are sized and positioned in LINE space, not character
-   space. Each span sets --tw/--th to the whole line's box and --tx/--ty
-   to its own offset within it, so one continuous map runs across every
-   letter instead of restarting inside each one. --ty matters because the
-   name wraps to two lines on phones.
+   Layers 1-3 are sized and positioned in LINE space, not character space.
+   Each span sets --tw/--th to the whole line's box and --tx/--ty to its
+   own offset within it, so one continuous map runs across every letter
+   instead of restarting inside each one. --ty matters because the name
+   wraps to two lines on phones.
+
+   --ww widens for fronts running nearly parallel to the line, which
+   arrive across the whole name at once rather than sweeping along it.
 
    Defaults keep this inert: with no --topo the layer is `none`, and with
-   --wa at 0 the highlight is fully transparent. */
+   the alphas at 0 the bands are fully transparent. */
 .ch{
   display:inline-block;
   text-align:center;
   white-space:pre;
   background-image:
     linear-gradient(90deg,
-      transparent calc(var(--wv,-1) * 100% - 8%),
-      rgba(205,150,255,calc(var(--wa,0) * .9)) calc(var(--wv,-1) * 100%),
-      transparent calc(var(--wv,-1) * 100% + 8%)),
+      transparent calc(var(--wv1,-1) * 100% - var(--ww,8%)),
+      rgba(205,150,255,calc(var(--wa1,0) * .9)) calc(var(--wv1,-1) * 100%),
+      transparent calc(var(--wv1,-1) * 100% + var(--ww,8%))),
+    linear-gradient(90deg,
+      transparent calc(var(--wv2,-1) * 100% - var(--ww,8%)),
+      rgba(205,150,255,calc(var(--wa2,0) * .9)) calc(var(--wv2,-1) * 100%),
+      transparent calc(var(--wv2,-1) * 100% + var(--ww,8%))),
     var(--topo,none),
     linear-gradient(180deg,#ffffff 0%,#8C8C95 100%);
   background-size:
     var(--tw,100%) var(--th,100%),
     var(--tw,100%) var(--th,100%),
+    var(--tw,100%) var(--th,100%),
     100% 100%;
   background-position:
+    var(--tx,0) var(--ty,0),
     var(--tx,0) var(--ty,0),
     var(--tx,0) var(--ty,0),
     0 0;
@@ -1361,35 +1363,50 @@ footer{
     }
 
     /* ── contour fill for the letterforms ──────────────────────────────
-       The name carries the same topographic idea as the backdrop, drawn
-       finer because it has to stay legible inside glyphs.
+       The name is cut from the same terrain as the backdrop, not a
+       lookalike. The noise below is a line-for-line port of the GLSL in
+       the scene module — same hash, same value noise, same two octaves —
+       and it is sampled in the same screen space, so a contour that runs
+       across the background continues through the letters without a seam.
 
-       Contours are traced with marching squares over a coarse height
-       field and stroked as real paths, rather than evaluating noise per
-       pixel. That matters here: a per-pixel version would have to be
-       generated at the line's full size (well over a megapixel) every
-       time the viewport changes, whereas tracing ~1200 grid samples and
-       stroking the result is instant and stays crisp at any size.
+       The level count is 30 against the backdrop's 15. Being an exact
+       multiple matters: every backdrop contour is also a contour here,
+       with one extra drawn between each pair. The name reads as a finer
+       survey of the same ground rather than a different pattern.
+
+       Contours are traced with marching squares and stroked as real
+       paths, rather than evaluating noise per pixel. A per-pixel version
+       would have to be generated at the line's full size — well over a
+       megapixel — on every resize, whereas tracing ~1300 grid samples is
+       instant and stays crisp at any size.
        ───────────────────────────────────────────────────────────────── */
 
-    // 2D value noise — independent of the GLSL one, this is a different
-    // surface and only needs to look like terrain
-    function h2(x, y){
-      var n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
-      return n - Math.floor(n);
+    // exact port of the module's GLSL noise
+    function gFract(x){ return x - Math.floor(x); }
+    function gHash(x, y, z){
+      var px = gFract(x * 0.3183099 + 0.1) * 17;
+      var py = gFract(y * 0.3183099 + 0.1) * 17;
+      var pz = gFract(z * 0.3183099 + 0.1) * 17;
+      return gFract(px * py * pz * (px + py + pz));
     }
-    function vn2(x, y){
-      var xi = Math.floor(x), yi = Math.floor(y);
-      var xf = x - xi, yf = y - yi;
-      var u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
-      var a = h2(xi, yi), b = h2(xi + 1, yi), c = h2(xi, yi + 1), d = h2(xi + 1, yi + 1);
-      return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+    function gMix(a, b, t){ return a + (b - a) * t; }
+    function gNoise(x, y, z){
+      var ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+      var fx = x - ix, fy = y - iy, fz = z - iz;
+      fx = fx*fx*(3-2*fx); fy = fy*fy*(3-2*fy); fz = fz*fz*(3-2*fz);
+      var h = function(dx, dy, dz){ return gHash(ix+dx, iy+dy, iz+dz); };
+      return gMix(
+        gMix(gMix(h(0,0,0), h(1,0,0), fx), gMix(h(0,1,0), h(1,1,0), fx), fy),
+        gMix(gMix(h(0,0,1), h(1,0,1), fx), gMix(h(0,1,1), h(1,1,1), fx), fy),
+        fz);
     }
-    function fbm2(x, y){
-      var v = 0, amp = 0.5;
-      for(var i = 0; i < 4; i++){
-        v += amp * vn2(x, y);
-        x *= 2.03; y *= 2.03; amp *= 0.5;
+    // two octaves, matching the topo shader's OCTAVES define
+    function gFbm(x, y, z){
+      var v = 0, a = 0.5;
+      for(var i = 0; i < 2; i++){
+        v += a * gNoise(x, y, z);
+        x *= 2.02; y *= 2.02; z *= 2.02;
+        a *= 0.5;
       }
       return v;
     }
@@ -1403,22 +1420,42 @@ footer{
       13:[[2,1]],       14:[[3,2]]
     };
 
-    function contourURL(w, h){
-      if(w < 8 || h < 8) return '';
+    /* Traces the contours for one line box. `box` is the line's rect and
+       `cv` is the canvas rect — the height field is evaluated in the
+       canvas's coordinate space, exactly as the shader does, so the lines
+       are a genuine continuation of the backdrop rather than a separate
+       pattern that merely resembles it.
+
+       The shader's v axis points up (WebGL uv) while screen y points
+       down, so the vertical mapping is flipped here. Getting this wrong
+       mirrors the terrain and destroys the registration. */
+    function contourURL(box, cvRect){
+      if(box.width < 8 || box.height < 8) return '';
+      if(!cvRect || cvRect.width < 8 || cvRect.height < 8) return '';
+
       var dpr = Math.min(window.devicePixelRatio || 1, 2);
       var cv = document.createElement('canvas');
-      cv.width  = Math.max(8, Math.round(w * dpr));
-      cv.height = Math.max(8, Math.round(h * dpr));
+      cv.width  = Math.max(8, Math.round(box.width  * dpr));
+      cv.height = Math.max(8, Math.round(box.height * dpr));
       var ctx = cv.getContext('2d');
       if(!ctx) return '';
 
+      var aspect = cvRect.width / cvRect.height;
       var GX = 96;
-      var GY = Math.max(10, Math.round(GX * h / w));
+      var GY = Math.max(10, Math.round(GX * box.height / box.width));
       var W1 = GX + 1;
       var H = new Float32Array(W1 * (GY + 1));
+
       for(var gy = 0; gy <= GY; gy++){
         for(var gx = 0; gx <= GX; gx++){
-          H[gy * W1 + gx] = fbm2(gx / GX * 3.2, gy / GY * 1.1);
+          // this sample's position on screen, then in the canvas's uv
+          var sxPix = box.left + (gx / GX) * box.width;
+          var syPix = box.top  + (gy / GY) * box.height;
+          var u = (sxPix - cvRect.left) / cvRect.width;
+          var v = 1 - (syPix - cvRect.top) / cvRect.height;   // flip to uv
+          var px = (u - 0.5) * aspect;
+          var py = (v - 0.5);
+          H[gy * W1 + gx] = gFbm(px * 2.3, py * 2.3, 0);
         }
       }
 
@@ -1428,15 +1465,14 @@ footer{
       ctx.lineCap     = 'round';
       ctx.strokeStyle = 'rgba(178,86,255,.62)';
 
-      // 30 levels against the backdrop's 15 — deliberately finer, so the
-      // name reads as a detail inset rather than a repeat of the backdrop
+      // exactly 2x the backdrop's 15, so every backdrop contour recurs here
       var LEVELS = 30;
       ctx.beginPath();
       for(var L = 1; L < LEVELS; L++){
         var lv = L / LEVELS;
         for(var cy = 0; cy < GY; cy++){
           for(var cx = 0; cx < GX; cx++){
-            var a = H[cy * W1 + cx],       b = H[cy * W1 + cx + 1],
+            var a = H[cy * W1 + cx],           b = H[cy * W1 + cx + 1],
                 c = H[(cy + 1) * W1 + cx + 1], d = H[(cy + 1) * W1 + cx];
             var idx = (a > lv ? 8 : 0) | (b > lv ? 4 : 0) |
                       (c > lv ? 2 : 0) | (d > lv ? 1 : 0);
@@ -1465,10 +1501,14 @@ footer{
     }
 
     function paintContours(){
+      var canvasEl = document.getElementById('car-canvas');
+      if(!canvasEl) return;
+      var cvRect = canvasEl.getBoundingClientRect();
+
       groups.forEach(function(g){
         var box = g.el.getBoundingClientRect();
         if(!box.width || !box.height) return;
-        var url = contourURL(box.width, box.height);
+        var url = contourURL(box, cvRect);
         if(!url) return;
         g.el.style.setProperty('--topo', 'url(' + url + ')');
         g.chars.forEach(function(c){
@@ -2201,7 +2241,12 @@ footer{
       'void main(){',
       '  if(uFade <= 0.001){ discard; }',
       '  vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0);',
-      '  float h = fbm(vec3(p * 2.3, uTime * 0.04));',
+      // The height field is static. It used to drift slowly through the
+      // third noise dimension, but the name bakes its contours from this
+      // same field, and a drifting field would slide out of register with
+      // the letters within seconds. The waves supply the motion; the
+      // terrain itself should hold still, which is what terrain does.
+      '  float h = fbm(vec3(p * 2.3, 0.0));',
       // One contour per height interval. No fwidth: it needs a
       // derivatives extension on WebGL1, and for a decorative backdrop a
       // fixed width is indistinguishable and portable.
@@ -2360,6 +2405,7 @@ footer{
     RADIUS = Math.max(dV, dH);
     LOOK.set(0, modelH / 2, 0);
     topoMat.uniforms.uAspect.value = camera.aspect;
+    refreshRects();   // the name sweep solves against these
 
     if(reduce && modelReady){ renderer.clear(); renderer.render(scene, camera); }
   }
@@ -2453,22 +2499,23 @@ footer{
      Phase is driven by one elapsed-time value rather than nested
      timeouts, so it can't leave a stray timer or land half-finished.
      ══════════════════════════════════════════════════════════════════ */
-  const PHASE = { IDLE:0, CHARGE:1, COLLAPSE:2, BLOOM:3, AMBIENT:4 };
-  const DUR   = { CHARGE:1000, COLLAPSE:190, BLOOM:1250 };
+  const PHASE = { IDLE:0, CHARGE:1, COLLAPSE:2, BLOOM:3, REST:4 };
+  const DUR   = { CHARGE:1000, COLLAPSE:190, BLOOM:1250, REST:2000 };
 
   let phase = PHASE.IDLE, phaseT = 0, orbit = 0;
   let punch = 0;        // camera dolly kick, world units
   let shake = 0;        // decaying positional jitter
+  let orbFade = 1;      // orbs dip out and return after a release
 
-  /* AMBIENT is terminal. Once the technique has been used the orbs are
-     gone for good and the contour map is simply part of the background,
-     breathing at random. Only a reload brings the orbs back — which makes
-     the one-shot feel like something that actually happened rather than a
-     button that replays. */
+  /* Once the technique has been used the contour map is permanent — it
+     keeps breathing underneath everything from then on. The orbs are not:
+     they clear out for a beat after the release and then reform, so the
+     scene settles back to something you can set off again rather than
+     ending in a dead state. */
+  let unlocked = false;
   let waveT = 0, waveDur = 0, waveWait = 0;
   let waveFrom = 0, waveTo = 1;
   let waveLinear = 0;
-  let sweepFlip = false;
   const waveDir = new THREE.Vector2(1, 0);
 
   function scheduleWave(){
@@ -2505,12 +2552,6 @@ footer{
     }else{
       waveFrom = lo - pad; waveTo = hi + pad;
     }
-
-    // the name sweeps in the wave's dominant horizontal direction; radial
-    // waves have none, so those alternate at random
-    sweepFlip = waveLinear
-      ? (waveDir.x < 0) !== (waveTo < waveFrom)
-      : Math.random() < 0.5;
   }
 
   function easeInOut(t){ return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
@@ -2522,32 +2563,143 @@ footer{
     phase = PHASE.CHARGE;
     phaseT = 0;
     wrap.classList.add('charging');
+    // greyed out until the orbs have reformed, so it can't be re-fired
+    // mid-sequence; REST hands it back
+    if(trigger) trigger.setAttribute('disabled', '');
   }
 
   function setFlash(v){
     if(flash) flash.style.opacity = v.toFixed(3);
   }
 
-  /* The name is swept by the same waves that cross the backdrop. Rather
-     than trying to evaluate the shader's coordinate along the text — which
-     is V-shaped for radial waves and would read as two bands colliding —
-     the highlight simply tracks the wave's own progress across the line.
-     One clean pass, in the wave's dominant direction.
+  /* The name is crossed by the same front that crosses the backdrop, at
+     the moment it actually gets there. Rather than faking a sweep from
+     the wave's progress, this inverts the shader's own coordinate: given
+     the front's position, solve for the screen x where it intersects the
+     name's line, and put the highlight exactly there.
 
-     Writes are skipped once the sweep is over, so this costs nothing while
-     the background is resting. */
+     That inversion is why there are two bands. A radial front is a ring,
+     and a ring crosses a horizontal line in two places — one moving left,
+     one moving right. A single band would have to pick one and would run
+     the wrong way across half the name.
+
+     Writes stop once a pass is over, so this costs nothing at rest. */
+  let nameRect = null, canvasRect = null;
   let sweptClear = true;
-  function setSweep(pos, amp){
+
+  function refreshRects(){
+    if(nameEl) nameRect = nameEl.getBoundingClientRect();
+    canvasRect = canvas.getBoundingClientRect();
+  }
+
+  function setBands(p1, a1, p2, a2, widthPct){
     if(!nameEl) return;
-    if(amp <= 0.001){
+    if(a1 <= 0.002 && a2 <= 0.002){
       if(sweptClear) return;
-      nameEl.style.setProperty('--wa', '0');
+      nameEl.style.setProperty('--wa1', '0');
+      nameEl.style.setProperty('--wa2', '0');
       sweptClear = true;
       return;
     }
-    nameEl.style.setProperty('--wv', pos.toFixed(3));
-    nameEl.style.setProperty('--wa', amp.toFixed(3));
+    const s = nameEl.style;
+    s.setProperty('--ww',  widthPct.toFixed(1) + '%');
+    s.setProperty('--wv1', p1.toFixed(3));
+    s.setProperty('--wa1', a1.toFixed(3));
+    s.setProperty('--wv2', p2.toFixed(3));
+    s.setProperty('--wa2', a2.toFixed(3));
     sweptClear = false;
+  }
+
+  function setSweep(waveCoord, amp){
+    if(!nameEl || !nameRect || !canvasRect || !nameRect.width){ setBands(0,0,0,0,8); return; }
+    if(amp <= 0.002){ setBands(0,0,0,0,8); return; }
+
+    const aspect = canvasRect.width / canvasRect.height;
+
+    // the name's midline, expressed in the shader's own p-space
+    const yMid = nameRect.top + nameRect.height * 0.5;
+    const v    = 1 - (yMid - canvasRect.top) / canvasRect.height;   // uv flips y
+    const py   = v - 0.5;
+
+    // p-space x back to a fraction across the name box
+    function toPos(px){
+      const u  = px / aspect + 0.5;
+      const sx = canvasRect.left + u * canvasRect.width;
+      return (sx - nameRect.left) / nameRect.width;
+    }
+
+    if(waveLinear){
+      // the shader normalises uDir, so this must too or the solved
+      // position drifts with the direction vector's length
+      const dl = Math.hypot(waveDir.x, waveDir.y) || 1;
+      const dx = waveDir.x / dl, dy = waveDir.y / dl;
+      const target = (waveCoord - 0.5) / 0.62;
+
+      // a front running nearly parallel to the line arrives everywhere at
+      // once; solving for x would divide by ~zero and fling the band off
+      if(Math.abs(dx) < 0.18){
+        const lineCoord = (py * dy) * 0.62 + 0.5;
+        const near = Math.max(0, 1 - Math.abs(waveCoord - lineCoord) / 0.22);
+        setBands(0.5, amp * near, 0, 0, 400);
+        return;
+      }
+      setBands(toPos((target - py * dy) / dx), amp, 0, 0, 8);
+      return;
+    }
+
+    // Radial: solve length(p) = waveCoord for x at the name's y. The wave
+    // starts and ends slightly outside the frame so it enters and leaves
+    // cleanly, which means waveCoord can be negative — and a negative
+    // radius has no solution, however well the algebra behaves.
+    if(waveCoord <= 0){ setBands(0, 0, 0, 0, 8); return; }
+    const r2 = waveCoord * waveCoord - py * py;
+    if(r2 <= 0){ setBands(0, 0, 0, 0, 8); return; }   // ring hasn't reached this row
+    const px = Math.sqrt(r2);
+    setBands(toPos(px), amp, toPos(-px), amp, 8);
+  }
+
+  /* The standing backdrop. Runs on its own clock from the moment the map
+     is unlocked, independent of what the orbs are doing — that is what
+     lets the orbs dip out and reform without the background pausing. */
+  // shared by IDLE and by the tail of REST, so the orbs reform exactly
+  // where they would have been rather than snapping to a new position
+  function placeIdleOrbs(ang){
+    const chest = modelH * 0.62;
+    const idleR = modelR + modelH * 0.42;
+    const orbR  = modelH * 0.13;
+    const bob   = Math.sin(ang * 1.4) * modelH * 0.005;
+
+    orbRed.position.set( Math.cos(ang) * idleR, chest + bob,  Math.sin(ang) * idleR);
+    orbBlue.position.set(-Math.cos(ang) * idleR, chest - bob, -Math.sin(ang) * idleR);
+
+    const p = 1 + Math.sin(ang * 2.1) * 0.06;
+    orbRed.scale.setScalar(orbR * p);
+    orbBlue.scale.setScalar(orbR * (2 - p));
+  }
+
+  function ambientTopo(dt){
+    const u = topoMat.uniforms;
+    u.uReveal.value = 0;      // fully drawn, no longer being revealed
+    u.uFade.value   = 1;
+    u.uBase.value   = 0.17;   // the map's resting presence
+
+    if(waveT < 0){
+      waveWait -= dt;
+      u.uAmp.value = 0;
+      setSweep(0, 0);
+      if(waveWait <= 0) beginWave();
+      return;
+    }
+
+    waveT += dt;
+    const k = Math.min(waveT / waveDur, 1);
+    const coord = waveFrom + (waveTo - waveFrom) * k;
+    u.uWave.value = coord;
+    // the front swells and subsides rather than snapping on and off
+    const amp = Math.sin(Math.PI * k) * 0.85;
+    u.uAmp.value = amp;
+    setSweep(coord, amp * 0.95);
+    if(k >= 1) scheduleWave();
   }
 
   function updateEffect(dt, now){
@@ -2562,48 +2714,42 @@ footer{
 
     wave.quaternion.copy(camera.quaternion);   // always faces the camera
 
-    if(phase === PHASE.AMBIENT){
-      // the orbs are spent; only the map remains
-      orbRed.visible = orbBlue.visible = orbPurp.visible = false;
-      streams.visible = wave.visible = false;
+    // the backdrop runs underneath every phase except the one that draws it
+    if(unlocked && phase !== PHASE.BLOOM) ambientTopo(dt);
+
+    if(phase === PHASE.REST){
+      phaseT += dt * 1000;
+      const t = Math.min(phaseT / DUR.REST, 1);
+
+      orbPurp.visible = wave.visible = streams.visible = false;
       punch += (0 - punch) * 0.08;
       setFlash(0);
 
-      const u = topoMat.uniforms;
-      u.uReveal.value = 0;      // fully drawn, no longer being revealed
-      u.uFade.value   = 1;
-      u.uBase.value   = 0.17;   // the map's resting presence
+      // gone for the first stretch, then reforming
+      orbFade = t < 0.45 ? 0 : (t - 0.45) / 0.55;
+      orbit += dt * 0.5;
 
-      if(waveT < 0){
-        waveWait -= dt;
-        u.uAmp.value = 0;
-        setSweep(0, 0);
-        if(waveWait <= 0) beginWave();
+      if(orbFade <= 0.001){
+        orbRed.visible = orbBlue.visible = false;
       }else{
-        waveT += dt;
-        const k = Math.min(waveT / waveDur, 1);
-        u.uWave.value = waveFrom + (waveTo - waveFrom) * k;
-        // the front swells and subsides rather than snapping on and off
-        const amp = Math.sin(Math.PI * k) * 0.85;
-        u.uAmp.value = amp;
-        // the letters get the same pass, slightly ahead so the name leads
-        const sk = Math.min(k * 1.12, 1);
-        setSweep(sweepFlip ? 1 - sk : sk, amp * 0.95);
-        if(k >= 1) scheduleWave();
+        placeIdleOrbs(orbit);
+        matRed.uniforms.uPower.value  = 1.15 * orbFade;
+        matBlue.uniforms.uPower.value = 1.15 * orbFade;
+        orbRed.visible = orbBlue.visible = true;
+      }
+
+      if(t >= 1){
+        phase = PHASE.IDLE;
+        phaseT = 0;
+        orbFade = 1;
+        if(trigger) trigger.removeAttribute('disabled');
       }
       return;
     }
 
     if(phase === PHASE.IDLE){
       orbit += dt * 0.5;
-      const bob = Math.sin(orbit * 1.4) * modelH * 0.005;
-
-      orbRed.position.set( Math.cos(orbit) * idleR, chest + bob,  Math.sin(orbit) * idleR);
-      orbBlue.position.set(-Math.cos(orbit) * idleR, chest - bob, -Math.sin(orbit) * idleR);
-
-      const p = 1 + Math.sin(orbit * 2.1) * 0.06;
-      orbRed.scale.setScalar(orbR * p);
-      orbBlue.scale.setScalar(orbR * (2 - p));
+      placeIdleOrbs(orbit);
 
       matRed.uniforms.uPower.value  = 1.15;
       matBlue.uniforms.uPower.value = 1.15;
@@ -2612,7 +2758,8 @@ footer{
 
       orbRed.visible = orbBlue.visible = true;
       orbPurp.visible = wave.visible = streams.visible = false;
-      topoMat.uniforms.uFade.value = 0;
+      // only silence the backdrop before it has ever been drawn
+      if(!unlocked) topoMat.uniforms.uFade.value = 0;
       punch += (0 - punch) * 0.08;
       setFlash(0);
       return;
@@ -2737,19 +2884,18 @@ footer{
     setFlash(Math.pow(1 - t, 2.2) * 0.74);
 
     if(t >= 1){
-      // terminal — no return to IDLE, so the orbs do not come back
-      phase = PHASE.AMBIENT;
+      // the map is now permanent; the orbs take a beat and come back
+      unlocked = true;
+      phase = PHASE.REST;
       phaseT = 0;
+      orbFade = 0;
+      orbRed.visible = orbBlue.visible = false;
       orbPurp.visible = wave.visible = false;
       matPurp.uniforms.uPower.value = 0;
       scheduleWave();
       wrap.classList.remove('charging');
       setFlash(0);
       setSweep(0, 0);
-      if(trigger){
-        trigger.setAttribute('disabled', '');
-        trigger.classList.add('spent');
-      }
     }
   }
 
