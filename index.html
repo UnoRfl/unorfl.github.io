@@ -593,11 +593,42 @@ section{padding:clamp(56px,9vw,110px) 0}
    Per-character is identical output (the ramp is vertical and every
    character shares a baseline) and each span invalidates its own fill.
    ─────────────────────────────────────────────────────────────────── */
+/* Three background layers, clipped to the glyphs:
+
+     1. the wave highlight — a band that sweeps the line when the
+        backdrop pulses, so the name is part of the same weather
+     2. the contour map — the same topographic idea as the backdrop but
+        drawn much finer, since it has to survive inside letterforms
+     3. the original vertical gradient
+
+   Layers 1 and 2 are sized and positioned in LINE space, not character
+   space. Each span sets --tw/--th to the whole line's box and --tx/--ty
+   to its own offset within it, so one continuous map runs across every
+   letter instead of restarting inside each one. --ty matters because the
+   name wraps to two lines on phones.
+
+   Defaults keep this inert: with no --topo the layer is `none`, and with
+   --wa at 0 the highlight is fully transparent. */
 .ch{
   display:inline-block;
   text-align:center;
   white-space:pre;
-  background:linear-gradient(180deg,#ffffff 0%,#8C8C95 100%);
+  background-image:
+    linear-gradient(90deg,
+      transparent calc(var(--wv,-1) * 100% - 8%),
+      rgba(205,150,255,calc(var(--wa,0) * .9)) calc(var(--wv,-1) * 100%),
+      transparent calc(var(--wv,-1) * 100% + 8%)),
+    var(--topo,none),
+    linear-gradient(180deg,#ffffff 0%,#8C8C95 100%);
+  background-size:
+    var(--tw,100%) var(--th,100%),
+    var(--tw,100%) var(--th,100%),
+    100% 100%;
+  background-position:
+    var(--tx,0) var(--ty,0),
+    var(--tx,0) var(--ty,0),
+    0 0;
+  background-repeat:no-repeat;
   -webkit-background-clip:text;background-clip:text;
   color:transparent;-webkit-text-fill-color:transparent;
 }
@@ -1329,6 +1360,129 @@ footer{
       requestAnimationFrame(frame);
     }
 
+    /* ── contour fill for the letterforms ──────────────────────────────
+       The name carries the same topographic idea as the backdrop, drawn
+       finer because it has to stay legible inside glyphs.
+
+       Contours are traced with marching squares over a coarse height
+       field and stroked as real paths, rather than evaluating noise per
+       pixel. That matters here: a per-pixel version would have to be
+       generated at the line's full size (well over a megapixel) every
+       time the viewport changes, whereas tracing ~1200 grid samples and
+       stroking the result is instant and stays crisp at any size.
+       ───────────────────────────────────────────────────────────────── */
+
+    // 2D value noise — independent of the GLSL one, this is a different
+    // surface and only needs to look like terrain
+    function h2(x, y){
+      var n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+      return n - Math.floor(n);
+    }
+    function vn2(x, y){
+      var xi = Math.floor(x), yi = Math.floor(y);
+      var xf = x - xi, yf = y - yi;
+      var u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+      var a = h2(xi, yi), b = h2(xi + 1, yi), c = h2(xi, yi + 1), d = h2(xi + 1, yi + 1);
+      return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+    }
+    function fbm2(x, y){
+      var v = 0, amp = 0.5;
+      for(var i = 0; i < 4; i++){
+        v += amp * vn2(x, y);
+        x *= 2.03; y *= 2.03; amp *= 0.5;
+      }
+      return v;
+    }
+
+    // marching squares: corner bits TL=8 TR=4 BR=2 BL=1, edges T=0 R=1 B=2 L=3
+    var SEGS = {
+      1:[[3,2]],        2:[[2,1]],        3:[[3,1]],
+      4:[[0,1]],        5:[[0,3],[2,1]],  6:[[0,2]],
+      7:[[0,3]],        8:[[0,3]],        9:[[0,2]],
+      10:[[0,1],[3,2]], 11:[[0,1]],       12:[[3,1]],
+      13:[[2,1]],       14:[[3,2]]
+    };
+
+    function contourURL(w, h){
+      if(w < 8 || h < 8) return '';
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      var cv = document.createElement('canvas');
+      cv.width  = Math.max(8, Math.round(w * dpr));
+      cv.height = Math.max(8, Math.round(h * dpr));
+      var ctx = cv.getContext('2d');
+      if(!ctx) return '';
+
+      var GX = 96;
+      var GY = Math.max(10, Math.round(GX * h / w));
+      var W1 = GX + 1;
+      var H = new Float32Array(W1 * (GY + 1));
+      for(var gy = 0; gy <= GY; gy++){
+        for(var gx = 0; gx <= GX; gx++){
+          H[gy * W1 + gx] = fbm2(gx / GX * 3.2, gy / GY * 1.1);
+        }
+      }
+
+      var sx = cv.width / GX, sy = cv.height / GY;
+      ctx.lineWidth   = Math.max(1, dpr * 0.85);
+      ctx.lineJoin    = 'round';
+      ctx.lineCap     = 'round';
+      ctx.strokeStyle = 'rgba(178,86,255,.62)';
+
+      // 30 levels against the backdrop's 15 — deliberately finer, so the
+      // name reads as a detail inset rather than a repeat of the backdrop
+      var LEVELS = 30;
+      ctx.beginPath();
+      for(var L = 1; L < LEVELS; L++){
+        var lv = L / LEVELS;
+        for(var cy = 0; cy < GY; cy++){
+          for(var cx = 0; cx < GX; cx++){
+            var a = H[cy * W1 + cx],       b = H[cy * W1 + cx + 1],
+                c = H[(cy + 1) * W1 + cx + 1], d = H[(cy + 1) * W1 + cx];
+            var idx = (a > lv ? 8 : 0) | (b > lv ? 4 : 0) |
+                      (c > lv ? 2 : 0) | (d > lv ? 1 : 0);
+            var segs = SEGS[idx];
+            if(!segs) continue;
+
+            var X0 = cx * sx, Y0 = cy * sy, X1 = X0 + sx, Y1 = Y0 + sy;
+            var e = [
+              [X0 + sx * (lv - a) / (b - a), Y0],   // top
+              [X1, Y0 + sy * (lv - b) / (c - b)],   // right
+              [X0 + sx * (lv - d) / (c - d), Y1],   // bottom
+              [X0, Y0 + sy * (lv - a) / (d - a)]    // left
+            ];
+            for(var s = 0; s < segs.length; s++){
+              var p = e[segs[s][0]], q = e[segs[s][1]];
+              ctx.moveTo(p[0], p[1]);
+              ctx.lineTo(q[0], q[1]);
+            }
+          }
+        }
+      }
+      ctx.stroke();
+
+      try{ return cv.toDataURL('image/png'); }
+      catch(err){ return ''; }
+    }
+
+    function paintContours(){
+      groups.forEach(function(g){
+        var box = g.el.getBoundingClientRect();
+        if(!box.width || !box.height) return;
+        var url = contourURL(box.width, box.height);
+        if(!url) return;
+        g.el.style.setProperty('--topo', 'url(' + url + ')');
+        g.chars.forEach(function(c){
+          var r = c.el.getBoundingClientRect();
+          // offsets are per character but measured against the LINE box,
+          // so the map runs continuously across the whole name
+          c.el.style.setProperty('--tw', box.width.toFixed(1) + 'px');
+          c.el.style.setProperty('--th', box.height.toFixed(1) + 'px');
+          c.el.style.setProperty('--tx', (-(r.left - box.left)).toFixed(1) + 'px');
+          c.el.style.setProperty('--ty', (-(r.top - box.top)).toFixed(1) + 'px');
+        });
+      });
+    }
+
     var name = document.getElementById('name');
     if(name){
       if(!reduce){
@@ -1341,11 +1495,12 @@ footer{
     // span gets pinned to the fallback font's metrics
     function boot(){
       fitName();
-      if(reduce) return;          // no scramble, so no width pinning needed
+      if(reduce){ paintContours(); return; }   // no scramble, but still mapped
       measure();
+      paintContours();
       // one more pass next frame: fonts.ready can resolve a tick before the
       // face is actually applied to this element, which throws the fit off
-      requestAnimationFrame(function(){ fitName(); measure(); });
+      requestAnimationFrame(function(){ fitName(); measure(); paintContours(); });
       play();
     }
     if(document.fonts && document.fonts.ready){
@@ -1357,7 +1512,11 @@ footer{
     var rm;
     window.addEventListener('resize', function(){
       clearTimeout(rm);
-      rm = setTimeout(function(){ fitName(); if(!reduce) measure(); }, 160);
+      rm = setTimeout(function(){
+        fitName();
+        if(!reduce) measure();
+        paintContours();
+      }, 160);
     }, {passive:true});
   })();
 
@@ -1631,6 +1790,7 @@ footer{
   const clLabel = document.getElementById('cl-label');
   const trigger = document.getElementById('cursed-trigger');
   const flash   = document.getElementById('cursed-flash');
+  const nameEl  = document.getElementById('name');
   if(!wrap || !canvas) return;
 
   const probe = document.createElement('canvas');
@@ -2308,6 +2468,7 @@ footer{
   let waveT = 0, waveDur = 0, waveWait = 0;
   let waveFrom = 0, waveTo = 1;
   let waveLinear = 0;
+  let sweepFlip = false;
   const waveDir = new THREE.Vector2(1, 0);
 
   function scheduleWave(){
@@ -2344,6 +2505,12 @@ footer{
     }else{
       waveFrom = lo - pad; waveTo = hi + pad;
     }
+
+    // the name sweeps in the wave's dominant horizontal direction; radial
+    // waves have none, so those alternate at random
+    sweepFlip = waveLinear
+      ? (waveDir.x < 0) !== (waveTo < waveFrom)
+      : Math.random() < 0.5;
   }
 
   function easeInOut(t){ return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2; }
@@ -2359,6 +2526,28 @@ footer{
 
   function setFlash(v){
     if(flash) flash.style.opacity = v.toFixed(3);
+  }
+
+  /* The name is swept by the same waves that cross the backdrop. Rather
+     than trying to evaluate the shader's coordinate along the text — which
+     is V-shaped for radial waves and would read as two bands colliding —
+     the highlight simply tracks the wave's own progress across the line.
+     One clean pass, in the wave's dominant direction.
+
+     Writes are skipped once the sweep is over, so this costs nothing while
+     the background is resting. */
+  let sweptClear = true;
+  function setSweep(pos, amp){
+    if(!nameEl) return;
+    if(amp <= 0.001){
+      if(sweptClear) return;
+      nameEl.style.setProperty('--wa', '0');
+      sweptClear = true;
+      return;
+    }
+    nameEl.style.setProperty('--wv', pos.toFixed(3));
+    nameEl.style.setProperty('--wa', amp.toFixed(3));
+    sweptClear = false;
   }
 
   function updateEffect(dt, now){
@@ -2388,13 +2577,18 @@ footer{
       if(waveT < 0){
         waveWait -= dt;
         u.uAmp.value = 0;
+        setSweep(0, 0);
         if(waveWait <= 0) beginWave();
       }else{
         waveT += dt;
         const k = Math.min(waveT / waveDur, 1);
         u.uWave.value = waveFrom + (waveTo - waveFrom) * k;
         // the front swells and subsides rather than snapping on and off
-        u.uAmp.value = Math.sin(Math.PI * k) * 0.85;
+        const amp = Math.sin(Math.PI * k) * 0.85;
+        u.uAmp.value = amp;
+        // the letters get the same pass, slightly ahead so the name leads
+        const sk = Math.min(k * 1.12, 1);
+        setSweep(sweepFlip ? 1 - sk : sk, amp * 0.95);
         if(k >= 1) scheduleWave();
       }
       return;
@@ -2536,6 +2730,9 @@ footer{
     tu.uAmp.value    = 1.5 * (1 - t);
     tu.uBase.value   = 0.17 + (1 - t) * 0.5;
 
+    // the drawback washes over the letters as it goes out
+    setSweep(t, Math.sin(Math.PI * Math.min(t / 0.85, 1)) * 1.0);
+
     punch += (0 - punch) * 0.07;
     setFlash(Math.pow(1 - t, 2.2) * 0.74);
 
@@ -2548,6 +2745,7 @@ footer{
       scheduleWave();
       wrap.classList.remove('charging');
       setFlash(0);
+      setSweep(0, 0);
       if(trigger){
         trigger.setAttribute('disabled', '');
         trigger.classList.add('spent');
