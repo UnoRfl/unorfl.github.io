@@ -2387,6 +2387,20 @@ footer{
   let RADIUS = 5;
   const LOOK = new THREE.Vector3(0, 1, 0);
 
+  /* These live here, above fit(), deliberately. fit() runs during init and
+     calls refreshRects(), which assigns them — and a `let` binding is in
+     its temporal dead zone until its own declaration executes. Leaving
+     these further down threw a ReferenceError straight out of init, which
+     aborted the module and took the whole scene with it: no figure, no
+     orbs, no backdrop. Function declarations hoist; let bindings do not. */
+  let nameRect = null, canvasRect = null;
+  let sweptClear = true;
+
+  function refreshRects(){
+    if(nameEl) nameRect = nameEl.getBoundingClientRect();
+    canvasRect = canvas.getBoundingClientRect();
+  }
+
   function fit(){
     const r = canvas.getBoundingClientRect();
     const w = Math.max(1, Math.floor(r.width));
@@ -2583,15 +2597,9 @@ footer{
      one moving right. A single band would have to pick one and would run
      the wrong way across half the name.
 
-     Writes stop once a pass is over, so this costs nothing at rest. */
-  let nameRect = null, canvasRect = null;
-  let sweptClear = true;
-
-  function refreshRects(){
-    if(nameEl) nameRect = nameEl.getBoundingClientRect();
-    canvasRect = canvas.getBoundingClientRect();
-  }
-
+     Writes stop once a pass is over, so this costs nothing at rest.
+     nameRect / canvasRect / refreshRects are declared up by fit(), which
+     needs them during init. */
   function setBands(p1, a1, p2, a2, widthPct){
     if(!nameEl) return;
     if(a1 <= 0.002 && a2 <= 0.002){
